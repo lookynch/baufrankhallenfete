@@ -1,0 +1,20 @@
+# Kopieren nach config.toml und anpassen. config.toml wird nicht eingecheckt.
+
+base_url = "https://DEINE-APP.pages.dev"
+agent_id = "bar-pc-1"
+
+# Secret möglichst über die Umgebungsvariable FETE_BUZZER_SECRET setzen (hat Vorrang).
+# Alternativ hier eintragen – dann config.toml vor fremdem Zugriff schützen.
+secret = ""
+
+serial_port = "COM3"            # Linux: "/dev/serial/by-id/usb-…" oder "/dev/ttyUSB0"
+baud = 9600
+
+# Codes der eigenen Buzzer als Strings. Leer = jeder empfangene Code zählt (nicht empfohlen).
+allowed_codes = ["CODE-VOM-BUZZER"]
+
+debounce_gap_ms = 600
+buffer_path = "fete_buffer.sqlite3"   # relativ zum Ordner dieser Datei
+beep = false
+heartbeat_seconds = 20
+request_timeout_seconds = 8
