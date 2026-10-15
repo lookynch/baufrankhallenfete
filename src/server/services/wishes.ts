@@ -91,7 +91,9 @@ export async function createWish(
 
   const inserted = await db
     .prepare(
-      `INSERT INTO wishes (song_id, device_id, status, created_at) VALUES (?1, ?2, 'open', ?3)
+      `INSERT INTO wishes (song_id, device_id, status, created_at)
+       SELECT ?1, ?2, 'open', ?3
+       WHERE NOT EXISTS (SELECT 1 FROM wishes WHERE song_id = ?1 AND status IN ('open', 'approved'))
        ON CONFLICT DO NOTHING RETURNING id, status`,
     )
     .bind(song.id, deviceId, now)

@@ -136,7 +136,7 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser }) 
   await expect(guest.getByText('Dein Songwunsch')).toBeVisible();
   await guest.screenshot({ path: join(shots, 'guest-wish.png'), fullPage: true });
 
-  await expect(tv.getByText('1 Stimmen')).toBeVisible({ timeout: 30_000 });
+  await expect(tv.getByText('Stimmen: 1')).toBeVisible({ timeout: 30_000 });
   await tv.screenshot({ path: join(shots, 'tv.png') });
 
   await admin.goto('/admin/ledger');

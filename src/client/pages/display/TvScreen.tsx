@@ -156,7 +156,7 @@ export function TvScreen({ state, offsetMs }: { state: MusicState; offsetMs: num
 
       <section className="flex min-h-0 flex-col gap-6">
         <div className="flex gap-6 rounded-3xl bg-surface/70 p-6 ring-1 ring-line">
-          {qrUrl ? <QrCode value={qrUrl} size={250} /> : null}
+          {qrUrl ? <QrCode value={qrUrl} size={220} /> : null}
           <div className="flex flex-1 flex-col justify-center gap-3">
             <div className="font-display text-4xl leading-tight font-bold">{t('tv.scan')}</div>
             <div className="font-mono text-xl break-all text-accent">{window.location.host}</div>
@@ -178,11 +178,11 @@ export function TvScreen({ state, offsetMs }: { state: MusicState; offsetMs: num
                 </div>
               </div>
               <ul className="flex flex-col gap-2.5">
-                {sorted.slice(0, 6).map((c, index) => (
+                {sorted.slice(0, 5).map((c, index) => (
                   <li key={c.songId} className="relative overflow-hidden rounded-xl bg-raised/70">
                     <div
                       className={`absolute inset-y-0 left-0 transition-[width] duration-700 ${index === 0 && (c.votes ?? 0) > 0 ? 'bg-primary/45' : 'bg-accent/20'}`}
-                      style={{ width: `${((c.votes ?? 0) / maxVotes) * 100}%` }}
+                      style={{ width: `${((c.votes ?? 0) / maxVotes) * 85}%` }}
                     />
                     <div className="relative flex items-center gap-3 px-3 py-2">
                       <Cover src={c.imageUrl} size={44} />
@@ -198,8 +198,9 @@ export function TvScreen({ state, offsetMs }: { state: MusicState; offsetMs: num
                   </li>
                 ))}
               </ul>
-              <div className="mt-3 text-right text-lg text-muted">
-                {t('tv.votes', { count: round.totalVotes ?? 0 })}
+              <div className="mt-3 flex justify-between text-lg text-muted">
+                <span>{sorted.length > 5 ? t('tv.more', { count: sorted.length - 5 }) : ''}</span>
+                <span>{t('tv.votes', { count: round.totalVotes ?? 0 })}</span>
               </div>
             </>
           ) : (
