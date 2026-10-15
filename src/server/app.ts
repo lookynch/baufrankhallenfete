@@ -32,7 +32,8 @@ export function createApp(options: AppOptions = {}) {
     let waitUntil: Runtime['waitUntil'];
     try {
       const ctx = c.executionCtx;
-      waitUntil = (promise) => ctx.waitUntil(promise.catch((error: unknown) => console.error('background task failed', error)));
+      waitUntil = (promise) =>
+        ctx.waitUntil(promise.catch((error: unknown) => console.error('background task failed', error)));
     } catch {
       waitUntil = (promise) => void promise.catch((error: unknown) => console.error('background task failed', error));
     }
@@ -70,7 +71,7 @@ export function createApp(options: AppOptions = {}) {
   app.route('/admin', admin);
 
   app.notFound((c) => c.json({ error: 'not_found' }, 404));
-  app.onError((error, c) => {
+  app.onError((error) => {
     const response = error instanceof HTTPException ? error.getResponse() : null;
     if (!response) console.error('unhandled error', error);
     const res = response ?? Response.json({ error: 'internal_error' }, { status: 500 });

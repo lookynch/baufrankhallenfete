@@ -14,7 +14,7 @@ export const theme = {
     text: [244, 244, 250],
     muted: [160, 160, 190],
     primary: [255, 64, 129],
-    primaryText: [255, 255, 255],
+    primaryText: [20, 6, 14],
     accent: [0, 229, 255],
     accentText: [6, 16, 24],
     success: [52, 211, 153],

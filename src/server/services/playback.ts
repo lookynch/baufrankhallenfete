@@ -8,15 +8,7 @@ const QUEUING_TIMEOUT_MS = 30_000;
 const PLAYED_TOLERANCE_MS = 15_000;
 
 export type PlaybackStatus =
-  | 'planned'
-  | 'queuing'
-  | 'queued'
-  | 'unknown'
-  | 'playing'
-  | 'played'
-  | 'skipped'
-  | 'missed'
-  | 'cancelled';
+  'planned' | 'queuing' | 'queued' | 'unknown' | 'playing' | 'played' | 'skipped' | 'missed' | 'cancelled';
 
 export interface PlaybackEntry {
   id: number;
@@ -124,7 +116,13 @@ async function playedSince(spotify: SpotifyApi, entry: PlaybackEntry): Promise<n
     (item) =>
       item.playedAt >= since &&
       tracksMatch(
-        { uri: item.track.uri, isrc: item.track.isrc, title: item.track.title, artist: item.track.artist, durationMs: item.track.durationMs },
+        {
+          uri: item.track.uri,
+          isrc: item.track.isrc,
+          title: item.track.title,
+          artist: item.track.artist,
+          durationMs: item.track.durationMs,
+        },
         entry,
       ),
   );
@@ -221,8 +219,14 @@ export async function expireStale(db: D1Database, now: number, snapshot: StoredS
   for (const entry of schedule) {
     const overdue = entry.scheduledEnd + 60_000 < now;
     if (entry.status === 'queuing' && entry.queued_at !== null && now - entry.queued_at > QUEUING_TIMEOUT_MS) {
-      statements.push(db.prepare("UPDATE playback SET status = 'unknown' WHERE id = ?1 AND status = 'queuing'").bind(entry.id));
-    } else if (entry.status === 'playing' && entry.started_at !== null && now > entry.started_at + entry.duration_ms + 60_000) {
+      statements.push(
+        db.prepare("UPDATE playback SET status = 'unknown' WHERE id = ?1 AND status = 'queuing'").bind(entry.id),
+      );
+    } else if (
+      entry.status === 'playing' &&
+      entry.started_at !== null &&
+      now > entry.started_at + entry.duration_ms + 60_000
+    ) {
       statements.push(
         db
           .prepare("UPDATE playback SET status = 'played', ended_at = ?2 WHERE id = ?1 AND status = 'playing'")
@@ -231,13 +235,17 @@ export async function expireStale(db: D1Database, now: number, snapshot: StoredS
     } else if (entry.status === 'queued' && overdue && !observing) {
       statements.push(
         db
-          .prepare("UPDATE playback SET status = 'played', ended_at = ?2, error = 'assumed_played' WHERE id = ?1 AND status = 'queued'")
+          .prepare(
+            "UPDATE playback SET status = 'played', ended_at = ?2, error = 'assumed_played' WHERE id = ?1 AND status = 'queued'",
+          )
           .bind(entry.id, entry.scheduledEnd),
       );
     } else if ((entry.status === 'planned' || entry.status === 'unknown') && overdue) {
       statements.push(
         db
-          .prepare("UPDATE playback SET status = 'missed', ended_at = ?2 WHERE id = ?1 AND status IN ('planned', 'unknown')")
+          .prepare(
+            "UPDATE playback SET status = 'missed', ended_at = ?2 WHERE id = ?1 AND status IN ('planned', 'unknown')",
+          )
           .bind(entry.id, now),
       );
     }
@@ -247,7 +255,11 @@ export async function expireStale(db: D1Database, now: number, snapshot: StoredS
 
 const RETRY_DELAYS_MS = [5_000, 10_000, 20_000, 30_000];
 
-export async function queueNext(db: D1Database, spotify: SpotifyApi, now: number): Promise<'queued' | 'idle' | 'failed'> {
+export async function queueNext(
+  db: D1Database,
+  spotify: SpotifyApi,
+  now: number,
+): Promise<'queued' | 'idle' | 'failed'> {
   const entries = await activeEntries(db);
   if (entries.some((e) => (PENDING_STATUSES as readonly string[]).includes(e.status))) return 'idle';
   const next = entries.find((e) => e.status === 'planned' && (e.retry_at === null || e.retry_at <= now));

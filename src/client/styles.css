@@ -1,0 +1,91 @@
+@import 'tailwindcss';
+
+@theme inline {
+  --color-bg: rgb(var(--t-background));
+  --color-surface: rgb(var(--t-surface));
+  --color-raised: rgb(var(--t-surface-raised));
+  --color-line: rgb(var(--t-border));
+  --color-fg: rgb(var(--t-text));
+  --color-muted: rgb(var(--t-muted));
+  --color-primary: rgb(var(--t-primary));
+  --color-on-primary: rgb(var(--t-primary-text));
+  --color-accent: rgb(var(--t-accent));
+  --color-on-accent: rgb(var(--t-accent-text));
+  --color-success: rgb(var(--t-success));
+  --color-warning: rgb(var(--t-warning));
+  --color-danger: rgb(var(--t-danger));
+  --color-mood-1: rgb(var(--t-mood-1));
+  --color-mood-2: rgb(var(--t-mood-2));
+  --color-mood-3: rgb(var(--t-mood-3));
+  --color-mood-4: rgb(var(--t-mood-4));
+  --color-mood-5: rgb(var(--t-mood-5));
+  --font-display: var(--t-font-display);
+  --font-sans: var(--t-font-body);
+  --font-mono: var(--t-font-mono);
+  --radius-theme: var(--t-radius);
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply min-h-dvh bg-bg font-sans text-fg antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-display tracking-tight;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-accent;
+  }
+}
+
+@utility glow {
+  box-shadow:
+    0 0 0 1px rgb(var(--t-primary) / 0.35),
+    0 10px 40px -10px rgb(var(--t-primary) / 0.55);
+}
+
+@utility bg-party {
+  background:
+    radial-gradient(60rem 40rem at 10% -10%, rgb(var(--t-primary) / 0.22), transparent 60%),
+    radial-gradient(50rem 40rem at 110% 10%, rgb(var(--t-accent) / 0.16), transparent 60%), rgb(var(--t-background));
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(0.96);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes ticker {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-pop {
+  animation: pop 180ms ease-out;
+}
+
+.animate-ticker {
+  animation: ticker 40s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-ticker,
+  .animate-pop {
+    animation: none;
+  }
+}

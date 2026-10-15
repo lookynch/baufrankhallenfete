@@ -41,7 +41,9 @@ export async function refreshBudget(env: Env, now: number, fetcher: typeof fetch
   const dayStart = new Date(now);
   dayStart.setUTCHours(0, 0, 0, 0);
   const totals = await Promise.all(
-    DATASETS.map((d) => queryDataset(env, d, dayStart.toISOString(), new Date(now).toISOString(), fetcher).catch(() => null)),
+    DATASETS.map((d) =>
+      queryDataset(env, d, dayStart.toISOString(), new Date(now).toISOString(), fetcher).catch(() => null),
+    ),
   );
   const known = totals.filter((t): t is number => t !== null);
   const requestsToday = known.length ? Math.max(...known) : null;

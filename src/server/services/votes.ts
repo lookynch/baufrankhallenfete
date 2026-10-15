@@ -33,7 +33,16 @@ export async function castVote(db: D1Database, settings: Settings, input: VoteIn
          )
        ON CONFLICT (round_id, device_id) DO UPDATE SET song_id = excluded.song_id, updated_at = excluded.updated_at`,
     )
-    .bind(input.roundId, input.deviceId, input.ipKey, input.fpHash, input.songId, input.verified ? 1 : 0, input.now, limit)
+    .bind(
+      input.roundId,
+      input.deviceId,
+      input.ipKey,
+      input.fpHash,
+      input.songId,
+      input.verified ? 1 : 0,
+      input.now,
+      limit,
+    )
     .run();
   if (result.meta.changes === 1) return 'ok';
   const state = await db

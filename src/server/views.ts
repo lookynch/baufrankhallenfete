@@ -52,18 +52,16 @@ export async function roundView(
       set_name: string | null;
     }>();
   const votes = options.includeTally ? new Map((await tally(db, round.id)).map((t) => [t.song_id, t.votes])) : null;
-  const candidates = results.map(
-    (r): CandidateView => ({
-      songId: r.song_id,
-      title: r.title,
-      artist: r.artist,
-      imageUrl: r.image_url,
-      durationMs: r.duration_ms,
-      explicit: r.explicit === 1,
-      wishKey: r.wish_id ? wishKey(r.wish_id) : null,
-      ...(votes ? { votes: votes.get(r.song_id) ?? 0 } : {}),
-    }),
-  );
+  const candidates = results.map((r): CandidateView => ({
+    songId: r.song_id,
+    title: r.title,
+    artist: r.artist,
+    imageUrl: r.image_url,
+    durationMs: r.duration_ms,
+    explicit: r.explicit === 1,
+    wishKey: r.wish_id ? wishKey(r.wish_id) : null,
+    ...(votes ? { votes: votes.get(r.song_id) ?? 0 } : {}),
+  }));
   return {
     id: round.id,
     seq: round.seq,

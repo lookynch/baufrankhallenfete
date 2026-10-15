@@ -32,7 +32,11 @@ export async function createSession(
   return token;
 }
 
-export async function loadSession(db: D1Database, token: string | undefined, now: number): Promise<AdminPrincipal | null> {
+export async function loadSession(
+  db: D1Database,
+  token: string | undefined,
+  now: number,
+): Promise<AdminPrincipal | null> {
   if (!token || token.length > 100) return null;
   const hash = await sha256Hex(token);
   const row = await db

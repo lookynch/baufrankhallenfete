@@ -53,7 +53,9 @@ function chunk<T>(items: T[], size: number): T[][] {
 
 export function songUpsertStatements(db: D1Database, tracks: SpotifyTrack[], now: number): D1PreparedStatement[] {
   return chunk(dedupeTracks(tracks), ROWS_PER_STATEMENT).map((rows) => {
-    const values = rows.map((_, i) => `(${Array.from({ length: SONG_COLUMNS }, (_, c) => `?${i * SONG_COLUMNS + c + 1}`).join(', ')})`);
+    const values = rows.map(
+      (_, i) => `(${Array.from({ length: SONG_COLUMNS }, (_, c) => `?${i * SONG_COLUMNS + c + 1}`).join(', ')})`,
+    );
     const params = rows.flatMap((t) => [
       t.uri,
       t.isrc,
@@ -143,7 +145,9 @@ export async function ensureSong(db: D1Database, track: SpotifyTrack, now: numbe
 }
 
 export async function listSets(db: D1Database): Promise<SetRow[]> {
-  const { results } = await db.prepare('SELECT id, name, starts_at, ends_at, default_level FROM sets ORDER BY starts_at').all<SetRow>();
+  const { results } = await db
+    .prepare('SELECT id, name, starts_at, ends_at, default_level FROM sets ORDER BY starts_at')
+    .all<SetRow>();
   return results;
 }
 
@@ -180,7 +184,9 @@ export async function saveSet(
     return input.id;
   }
   const row = await db
-    .prepare('INSERT INTO sets (name, starts_at, ends_at, default_level, created_at) VALUES (?1, ?2, ?3, ?4, ?5) RETURNING id')
+    .prepare(
+      'INSERT INTO sets (name, starts_at, ends_at, default_level, created_at) VALUES (?1, ?2, ?3, ?4, ?5) RETURNING id',
+    )
     .bind(input.name, input.starts_at, input.ends_at, input.default_level, now)
     .first<{ id: number }>();
   if (!row) throw new LibraryError('set_not_created');

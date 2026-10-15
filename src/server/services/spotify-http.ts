@@ -99,7 +99,10 @@ export function createHttpSpotify(env: Env, now: () => number, fetcher: typeof f
       });
     },
     async addToQueue(uri) {
-      return mapResult(await call('POST', `/me/player/queue?uri=${encodeURIComponent(uri)}`, { expectJson: false }), () => null);
+      return mapResult(
+        await call('POST', `/me/player/queue?uri=${encodeURIComponent(uri)}`, { expectJson: false }),
+        () => null,
+      );
     },
     async skipNext() {
       return mapResult(await call('POST', '/me/player/next', { expectJson: false }), () => null);
@@ -108,7 +111,10 @@ export function createHttpSpotify(env: Env, now: () => number, fetcher: typeof f
       return mapResult(await call('PUT', '/me/player/repeat?state=context', { expectJson: false }), () => null);
     },
     async startContext(contextUri) {
-      return mapResult(await call('PUT', '/me/player/play', { body: { context_uri: contextUri }, expectJson: false }), () => null);
+      return mapResult(
+        await call('PUT', '/me/player/play', { body: { context_uri: contextUri }, expectJson: false }),
+        () => null,
+      );
     },
     async player() {
       return mapResult(await call('GET', '/me/player'), (json): PlayerInfo => {
@@ -124,13 +130,20 @@ export function createHttpSpotify(env: Env, now: () => number, fetcher: typeof f
     async recentlyPlayed() {
       return mapResult(await call('GET', '/me/player/recently-played?limit=50'), (json) =>
         (Array.isArray(json?.items) ? (json.items as Json[]) : [])
-          .map((i) => ({ track: mapTrack(i.track as Parameters<typeof mapTrack>[0]), playedAt: Date.parse(String(i.played_at)) }))
-          .filter((i): i is { track: SpotifyTrack; playedAt: number } => i.track !== null && Number.isFinite(i.playedAt)),
+          .map((i) => ({
+            track: mapTrack(i.track as Parameters<typeof mapTrack>[0]),
+            playedAt: Date.parse(String(i.played_at)),
+          }))
+          .filter(
+            (i): i is { track: SpotifyTrack; playedAt: number } => i.track !== null && Number.isFinite(i.playedAt),
+          ),
       );
     },
     async search(query) {
       const params = new URLSearchParams({ q: query, type: 'track', limit: '10', market: 'from_token' });
-      return mapResult(await call('GET', `/search?${params}`), (json) => tracksFrom((json?.tracks as Json | undefined)?.items));
+      return mapResult(await call('GET', `/search?${params}`), (json) =>
+        tracksFrom((json?.tracks as Json | undefined)?.items),
+      );
     },
     async track(id) {
       const result = await call('GET', `/tracks/${encodeURIComponent(id)}?market=from_token`);
@@ -152,15 +165,13 @@ export function createHttpSpotify(env: Env, now: () => number, fetcher: typeof f
     },
     async myPlaylists() {
       return mapResult(await call('GET', '/me/playlists?limit=50'), (json) =>
-        (Array.isArray(json?.items) ? (json.items as Json[]) : []).map(
-          (p): PlaylistSummary => ({
-            uri: String(p.uri),
-            id: String(p.id),
-            name: String(p.name ?? ''),
-            trackCount: Number(((p.items ?? p.tracks) as Json | undefined)?.total ?? 0),
-            owner: String((p.owner as Json | undefined)?.display_name ?? ''),
-          }),
-        ),
+        (Array.isArray(json?.items) ? (json.items as Json[]) : []).map((p): PlaylistSummary => ({
+          uri: String(p.uri),
+          id: String(p.id),
+          name: String(p.name ?? ''),
+          trackCount: Number(((p.items ?? p.tracks) as Json | undefined)?.total ?? 0),
+          owner: String((p.owner as Json | undefined)?.display_name ?? ''),
+        })),
       );
     },
   };

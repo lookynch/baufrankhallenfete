@@ -51,7 +51,7 @@ export async function searchTracks(
 
 async function trackFromCache(db: D1Database, uri: string): Promise<SpotifyTrack | null> {
   const { results } = await db
-    .prepare("SELECT results FROM search_cache WHERE results LIKE ?1 ORDER BY fetched_at DESC LIMIT 5")
+    .prepare('SELECT results FROM search_cache WHERE results LIKE ?1 ORDER BY fetched_at DESC LIMIT 5')
     .bind(`%${uri}%`)
     .all<{ results: string }>();
   for (const row of results) {
@@ -174,7 +174,9 @@ export async function decideWish(
     db
       .prepare("UPDATE wishes SET status = 'approved', decided_at = ?2, decided_by = ?3 WHERE id = ?1")
       .bind(wishId, now, userId),
-    db.prepare('INSERT OR IGNORE INTO set_songs (set_id, song_id, added_at) VALUES (?1, ?2, ?3)').bind(decision.setId, wish.song_id, now),
+    db
+      .prepare('INSERT OR IGNORE INTO set_songs (set_id, song_id, added_at) VALUES (?1, ?2, ?3)')
+      .bind(decision.setId, wish.song_id, now),
   ];
   if (decision.level !== null) {
     statements.push(db.prepare('UPDATE songs SET mood_level = ?2 WHERE id = ?1').bind(wish.song_id, decision.level));

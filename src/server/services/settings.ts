@@ -35,7 +35,8 @@ export async function saveSettings<K extends SettingsKey>(
   const current = await loadSettings(db, now);
   const before = current[key];
   const parsed = settingsSchemas[key].safeParse({ ...before, ...patch });
-  if (!parsed.success) throw new SettingsError(parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
+  if (!parsed.success)
+    throw new SettingsError(parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
   const after = parsed.data as Settings[K];
   validateSettings({ ...current, [key]: after });
   await db

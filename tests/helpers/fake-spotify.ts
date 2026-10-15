@@ -51,7 +51,8 @@ export class FakeSpotify implements SpotifyApi {
   async currentlyPlaying() {
     if (this.offline) return { ok: false as const, kind: 'unknown' as const };
     this.advance();
-    if (!this.current) return { ok: true as const, value: { isPlaying: false, progressMs: 0, track: null, contextUri: null } };
+    if (!this.current)
+      return { ok: true as const, value: { isPlaying: false, progressMs: 0, track: null, contextUri: null } };
     return {
       ok: true as const,
       value: {
@@ -80,7 +81,10 @@ export class FakeSpotify implements SpotifyApi {
     return { ok: true, value: null };
   }
   async player() {
-    return { ok: true as const, value: { deviceName: 'Fake', deviceActive: true, repeatState: 'context', shuffle: false } };
+    return {
+      ok: true as const,
+      value: { deviceName: 'Fake', deviceActive: true, repeatState: 'context', shuffle: false },
+    };
   }
   async recentlyPlayed() {
     if (this.offline) return { ok: false as const, kind: 'unknown' as const };
@@ -92,7 +96,10 @@ export class FakeSpotify implements SpotifyApi {
   }
   async search(query: string) {
     const q = query.toLowerCase();
-    return { ok: true as const, value: [...this.catalog.values()].filter((t) => t.title.toLowerCase().includes(q)).slice(0, 10) };
+    return {
+      ok: true as const,
+      value: [...this.catalog.values()].filter((t) => t.title.toLowerCase().includes(q)).slice(0, 10),
+    };
   }
   async track(id: string): Promise<SpotifyResult<SpotifyTrack>> {
     const track = this.catalog.get(`spotify:track:${id}`);

@@ -32,17 +32,10 @@ export interface PlaylistSummary {
 }
 
 export type SpotifyFailure =
-  | 'not_connected'
-  | 'no_device'
-  | 'rate_limited'
-  | 'unauthorized'
-  | 'not_found'
-  | 'client_error'
-  | 'unknown';
+  'not_connected' | 'no_device' | 'rate_limited' | 'unauthorized' | 'not_found' | 'client_error' | 'unknown';
 
 export type SpotifyResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; kind: SpotifyFailure; status?: number; message?: string };
+  { ok: true; value: T } | { ok: false; kind: SpotifyFailure; status?: number; message?: string };
 
 export interface SpotifyApi {
   currentlyPlaying(): Promise<SpotifyResult<PlaybackSnapshot>>;
@@ -54,7 +47,10 @@ export interface SpotifyApi {
   recentlyPlayed(): Promise<SpotifyResult<Array<{ track: SpotifyTrack; playedAt: number }>>>;
   search(query: string): Promise<SpotifyResult<SpotifyTrack[]>>;
   track(id: string): Promise<SpotifyResult<SpotifyTrack>>;
-  playlistPage(id: string, offset: number): Promise<SpotifyResult<{ tracks: SpotifyTrack[]; next: number | null; total: number }>>;
+  playlistPage(
+    id: string,
+    offset: number,
+  ): Promise<SpotifyResult<{ tracks: SpotifyTrack[]; next: number | null; total: number }>>;
   myPlaylists(): Promise<SpotifyResult<PlaylistSummary[]>>;
 }
 

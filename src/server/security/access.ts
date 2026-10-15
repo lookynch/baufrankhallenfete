@@ -31,7 +31,11 @@ export async function verifyAccessJwt(
   if (!headerPart || !payloadPart || !signaturePart) return false;
   try {
     const header = JSON.parse(base64UrlDecodeText(headerPart)) as { kid?: string; alg?: string };
-    const payload = JSON.parse(base64UrlDecodeText(payloadPart)) as { aud?: string | string[]; exp?: number; iss?: string };
+    const payload = JSON.parse(base64UrlDecodeText(payloadPart)) as {
+      aud?: string | string[];
+      exp?: number;
+      iss?: string;
+    };
     if (header.alg !== 'RS256') return false;
     const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
     if (!audiences.includes(audience)) return false;

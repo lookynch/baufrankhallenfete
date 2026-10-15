@@ -41,7 +41,11 @@ async function runEvening(scenario: Scenario) {
   await saveSettings(db, 'preshow', { playlistUri: 'spotify:playlist:preshow123', level: 2 }, T0, null);
 
   const warmup = await saveSet(db, { name: 'Warm-up', starts_at: T0, ends_at: T0 + 2.5 * HOUR, default_level: 2 }, T0);
-  const party = await saveSet(db, { name: 'Party', starts_at: T0 + 2.5 * HOUR, ends_at: T0 + 8 * HOUR, default_level: 4 }, T0);
+  const party = await saveSet(
+    db,
+    { name: 'Party', starts_at: T0 + 2.5 * HOUR, ends_at: T0 + 8 * HOUR, default_level: 4 },
+    T0,
+  );
 
   const levelByUri = new Map<string, number>();
   const addSongs = async (setId: number, prefix: string, count: number, level: number | null, defaultLevel: number) => {
@@ -129,7 +133,8 @@ describe('Abendsimulation', () => {
       .prepare("SELECT seq, opened_at, closed_at FROM rounds WHERE status = 'closed' ORDER BY seq")
       .all<{ seq: number; opened_at: number; closed_at: number }>();
     expect(rounds.length).toBeGreaterThan(10);
-    for (const round of rounds) expect(round.closed_at - round.opened_at).toBeGreaterThanOrEqual(MIN_VOTING_MINUTES * MINUTE);
+    for (const round of rounds)
+      expect(round.closed_at - round.opened_at).toBeGreaterThanOrEqual(MIN_VOTING_MINUTES * MINUTE);
     const durations = rounds.map((r) => (r.closed_at - r.opened_at) / MINUTE);
     expect(Math.max(...durations)).toBeLessThan(30);
 
@@ -152,7 +157,9 @@ describe('Abendsimulation', () => {
     const recovered = spotify.log.filter((e) => e.startedAt > T0 + 1.75 * HOUR + 10 * MINUTE);
     expect(recovered.length).toBeGreaterThan(10);
     expect(recovered.filter((e) => e.source === 'context')).toEqual([]);
-    const emergencies = await db.prepare("SELECT COUNT(*) AS n FROM observed_plays WHERE kind = 'emergency'").first<{ n: number }>();
+    const emergencies = await db
+      .prepare("SELECT COUNT(*) AS n FROM observed_plays WHERE kind = 'emergency'")
+      .first<{ n: number }>();
     expect(emergencies?.n ?? 0).toBeGreaterThan(0);
   });
 

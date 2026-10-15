@@ -6,7 +6,13 @@ import { body, clientIpHash, fail, type AppContext, type AppEnv } from '../http.
 import { presenceToken } from '../security/presence.ts';
 import { hitRateLimit } from '../security/ratelimit.ts';
 import { readBudget, refreshBudget, throttleFactor } from '../services/budget.ts';
-import { authenticateDisplay, DISPLAY_COOKIE, pollPairing, startPairing, type DisplayRow } from '../services/displays.ts';
+import {
+  authenticateDisplay,
+  DISPLAY_COOKIE,
+  pollPairing,
+  startPairing,
+  type DisplayRow,
+} from '../services/displays.ts';
 import { accountBalances, bookingNo, buckets, consumptionStats, journal } from '../services/ledger.ts';
 import { activeEntries, computeSchedule, nextTickAt } from '../services/playback.ts';
 import { expectedCloseAt, openRound, votingActive } from '../services/rounds.ts';
@@ -63,7 +69,8 @@ displayRoutes.get('/state', async (c) => {
     return c.json({ ...base, ...(await musicState(c, settings, now, display.kind === 'tv')) });
   }
   const pollAfterMs = settings.polling.barMs * throttleFactor(await readBudget(c.env.DB), now);
-  if (display.kind === 'bar_stats') return c.json({ ...base, pollAfterMs, ...(await statsState(c.env.DB, settings, now)) });
+  if (display.kind === 'bar_stats')
+    return c.json({ ...base, pollAfterMs, ...(await statsState(c.env.DB, settings, now)) });
   return c.json({ ...base, pollAfterMs, ...(await ledgerState(c.env.DB, settings, now)) });
 });
 

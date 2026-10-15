@@ -65,9 +65,10 @@ export async function bookBuzzerPress(
       .bind(press.eventId, press.agentId, press.sourceCode, press.pressedAt, press.receivedAt, reviewMs),
     db
       .prepare(
-        `INSERT OR IGNORE INTO ledger_entries
+        `INSERT INTO ledger_entries
            (booked_at, effective_at, kind, debit_account, credit_account, amount_cents, quantity, text, ref_type, ref_id)
-         VALUES (?1, ?2, 'consumption', ?3, ?4, ?5, 1, 'Kasten Getränke (Buzzer)', 'buzzer', ?6)`,
+         SELECT ?1, ?2, 'consumption', ?3, ?4, ?5, 1, 'Kasten Getränke (Buzzer)', 'buzzer', ?6
+         WHERE NOT EXISTS (SELECT 1 FROM ledger_entries WHERE ref_type = 'buzzer' AND ref_id = ?6)`,
       )
       .bind(
         press.receivedAt,
@@ -103,7 +104,12 @@ export interface ManualEntryInput {
   effectiveAt: number;
 }
 
-export async function bookManual(db: D1Database, input: ManualEntryInput, userId: number, now: number): Promise<number> {
+export async function bookManual(
+  db: D1Database,
+  input: ManualEntryInput,
+  userId: number,
+  now: number,
+): Promise<number> {
   if (input.debitAccount === input.creditAccount) throw new LedgerError('same_account');
   if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) throw new LedgerError('invalid_amount');
   const quantity = input.kind === 'consumption' ? Math.max(1, input.quantity) : 0;
@@ -118,7 +124,17 @@ export async function bookManual(db: D1Database, input: ManualEntryInput, userId
         `INSERT INTO ledger_entries (booked_at, effective_at, kind, debit_account, credit_account, amount_cents, quantity, text, created_by)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) RETURNING id`,
       )
-      .bind(now, input.effectiveAt, input.kind, input.debitAccount, input.creditAccount, input.amountCents, quantity, input.text, userId),
+      .bind(
+        now,
+        input.effectiveAt,
+        input.kind,
+        input.debitAccount,
+        input.creditAccount,
+        input.amountCents,
+        quantity,
+        input.text,
+        userId,
+      ),
     bucketStatement(db, bucketOf(input.effectiveAt)),
   ]);
   const id = (results[0]?.results[0] as { id: number } | undefined)?.id;
@@ -126,7 +142,13 @@ export async function bookManual(db: D1Database, input: ManualEntryInput, userId
   return id;
 }
 
-export async function reverseEntry(db: D1Database, entryId: number, userId: number, now: number, reason: string): Promise<number> {
+export async function reverseEntry(
+  db: D1Database,
+  entryId: number,
+  userId: number,
+  now: number,
+  reason: string,
+): Promise<number> {
   const original = await db
     .prepare('SELECT * FROM ledger_entries WHERE id = ?1')
     .bind(entryId)
@@ -136,9 +158,11 @@ export async function reverseEntry(db: D1Database, entryId: number, userId: numb
   const results = await db.batch([
     db
       .prepare(
-        `INSERT OR IGNORE INTO ledger_entries
+        `INSERT INTO ledger_entries
            (booked_at, effective_at, kind, debit_account, credit_account, amount_cents, quantity, text, ref_type, ref_id, reversal_of, created_by)
-         VALUES (?1, ?2, 'reversal', ?3, ?4, ?5, ?6, ?7, 'reversal', ?8, ?8, ?9) RETURNING id`,
+         SELECT ?1, ?2, 'reversal', ?3, ?4, ?5, ?6, ?7, 'reversal', ?8, ?8, ?9
+         WHERE NOT EXISTS (SELECT 1 FROM ledger_entries WHERE reversal_of = ?8)
+         RETURNING id`,
       )
       .bind(
         now,
@@ -201,7 +225,9 @@ export interface Bucket {
 
 export async function buckets(db: D1Database, from: number, to: number): Promise<Bucket[]> {
   const { results } = await db
-    .prepare('SELECT bucket_start, crates, cost_cents FROM stat_buckets WHERE bucket_start >= ?1 AND bucket_start < ?2 ORDER BY bucket_start')
+    .prepare(
+      'SELECT bucket_start, crates, cost_cents FROM stat_buckets WHERE bucket_start >= ?1 AND bucket_start < ?2 ORDER BY bucket_start',
+    )
     .bind(bucketOf(from), to)
     .all<Bucket>();
   return results;

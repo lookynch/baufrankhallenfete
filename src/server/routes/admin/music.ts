@@ -5,14 +5,7 @@ import { moodLevelSchema } from '../../../shared/settings.ts';
 import { body, fail, idParam, query, type AppContext, type AppEnv } from '../../http.ts';
 import { randomToken, signValue, verifySignedValue } from '../../security/crypto.ts';
 import { audit } from '../../services/audit.ts';
-import {
-  importTracks,
-  LibraryError,
-  listSets,
-  saveSet,
-  setCoverage,
-  type SongRow,
-} from '../../services/library.ts';
+import { importTracks, LibraryError, listSets, saveSet, setCoverage, type SongRow } from '../../services/library.ts';
 import { activeEntries, computeSchedule } from '../../services/playback.ts';
 import { finalizeRound, openRound, tally } from '../../services/rounds.ts';
 import { loadSettings } from '../../services/settings.ts';
@@ -57,12 +50,20 @@ musicRoutes.post('/spotify/authorize', async (c) => {
 musicRoutes.post('/spotify/callback', async (c) => {
   const now = c.var.rt.now();
   const input = await body(c, z.object({ code: z.string().min(10).max(1000), state: z.string().min(10).max(100) }));
-  const stored = await verifySignedValue<{ s: string; u: number }>(c.env.COOKIE_SECRET, 'oauth', getCookie(c, OAUTH_COOKIE));
+  const stored = await verifySignedValue<{ s: string; u: number }>(
+    c.env.COOKIE_SECRET,
+    'oauth',
+    getCookie(c, OAUTH_COOKIE),
+  );
   deleteCookie(c, OAUTH_COOKIE, { path: '/', secure: true });
   if (!stored || stored.s !== input.state || stored.u !== c.var.admin.userId) fail(403, 'oauth_state_mismatch');
   const tokens = await exchangeCode(c.env, input.code, redirectUri(c), now);
   if (!tokens) fail(502, 'spotify_exchange_failed');
-  await audit(c.env.DB, now, { userId: c.var.admin.userId, action: 'spotify_connected', after: { account: tokens.accountName } });
+  await audit(c.env.DB, now, {
+    userId: c.var.admin.userId,
+    action: 'spotify_connected',
+    after: { account: tokens.accountName },
+  });
   return c.json({ ok: true, accountName: tokens.accountName });
 });
 
@@ -106,7 +107,9 @@ musicRoutes.get('/spotify/search', async (c) => {
   if (!result.ok) fail(502, result.kind);
   const uris = result.value.map((t) => t.uri);
   const known = uris.length
-    ? await c.env.DB.prepare(`SELECT spotify_uri FROM songs WHERE spotify_uri IN (${uris.map((_, i) => `?${i + 1}`).join(', ')})`)
+    ? await c.env.DB.prepare(
+        `SELECT spotify_uri FROM songs WHERE spotify_uri IN (${uris.map((_, i) => `?${i + 1}`).join(', ')})`,
+      )
         .bind(...uris)
         .all<{ spotify_uri: string }>()
     : { results: [] };
@@ -118,7 +121,11 @@ musicRoutes.post('/library/import', async (c) => {
   const now = c.var.rt.now();
   const input = await body(
     c,
-    z.object({ reference: z.string().min(5).max(300), setId: z.number().int().positive().nullable(), offset: z.number().int().min(0).default(0) }),
+    z.object({
+      reference: z.string().min(5).max(300),
+      setId: z.number().int().positive().nullable(),
+      offset: z.number().int().min(0).default(0),
+    }),
   );
   const ref = parseSpotifyReference(input.reference);
   if (!ref) fail(422, 'invalid_spotify_reference');
@@ -171,7 +178,8 @@ musicRoutes.get('/songs', async (c) => {
     conditions.push(sql.replaceAll('?', `?${params.length}`));
   };
   if (input.setId) add('EXISTS (SELECT 1 FROM set_songs x WHERE x.song_id = s.id AND x.set_id = ?)', input.setId);
-  if (input.q) add("(s.title LIKE ? ESCAPE '\\' OR s.artist LIKE ? ESCAPE '\\')", `%${input.q.replace(/[\\%_]/g, '\\$&')}%`);
+  if (input.q)
+    add("(s.title LIKE ? ESCAPE '\\' OR s.artist LIKE ? ESCAPE '\\')", `%${input.q.replace(/[\\%_]/g, '\\$&')}%`);
   if (input.level) {
     params.push(input.level);
     const p = `?${params.length}`;
@@ -197,15 +205,30 @@ musicRoutes.get('/songs', async (c) => {
 musicRoutes.patch('/songs/:id', async (c) => {
   const now = c.var.rt.now();
   const id = idParam(c);
-  const input = await body(c, z.object({ mood_level: moodLevelSchema.nullable().optional(), active: z.boolean().optional() }));
+  const input = await body(
+    c,
+    z.object({ mood_level: moodLevelSchema.nullable().optional(), active: z.boolean().optional() }),
+  );
   const before = await c.env.DB.prepare('SELECT mood_level, active FROM songs WHERE id = ?1').bind(id).first();
   if (!before) fail(404, 'song_not_found');
   await c.env.DB.prepare(
     `UPDATE songs SET mood_level = CASE WHEN ?2 THEN ?3 ELSE mood_level END, active = COALESCE(?4, active) WHERE id = ?1`,
   )
-    .bind(id, input.mood_level !== undefined ? 1 : 0, input.mood_level ?? null, input.active === undefined ? null : input.active ? 1 : 0)
+    .bind(
+      id,
+      input.mood_level !== undefined ? 1 : 0,
+      input.mood_level ?? null,
+      input.active === undefined ? null : input.active ? 1 : 0,
+    )
     .run();
-  await audit(c.env.DB, now, { userId: c.var.admin.userId, action: 'song_update', entity: 'song', entityId: id, before, after: input });
+  await audit(c.env.DB, now, {
+    userId: c.var.admin.userId,
+    action: 'song_update',
+    entity: 'song',
+    entityId: id,
+    before,
+    after: input,
+  });
   return c.json({ ok: true });
 });
 
@@ -213,7 +236,13 @@ musicRoutes.post('/sets/:setId/songs/:songId/remove', async (c) => {
   const setId = idParam(c, 'setId');
   const songId = idParam(c, 'songId');
   await c.env.DB.prepare('DELETE FROM set_songs WHERE set_id = ?1 AND song_id = ?2').bind(setId, songId).run();
-  await audit(c.env.DB, c.var.rt.now(), { userId: c.var.admin.userId, action: 'set_song_remove', entity: 'set', entityId: setId, before: { songId } });
+  await audit(c.env.DB, c.var.rt.now(), {
+    userId: c.var.admin.userId,
+    action: 'set_song_remove',
+    entity: 'set',
+    entityId: setId,
+    before: { songId },
+  });
   return c.json({ ok: true });
 });
 
@@ -223,7 +252,13 @@ musicRoutes.post('/sets/:setId/songs/:songId/add', async (c) => {
   await c.env.DB.prepare('INSERT OR IGNORE INTO set_songs (set_id, song_id, added_at) VALUES (?1, ?2, ?3)')
     .bind(setId, songId, c.var.rt.now())
     .run();
-  await audit(c.env.DB, c.var.rt.now(), { userId: c.var.admin.userId, action: 'set_song_add', entity: 'set', entityId: setId, after: { songId } });
+  await audit(c.env.DB, c.var.rt.now(), {
+    userId: c.var.admin.userId,
+    action: 'set_song_add',
+    entity: 'set',
+    entityId: setId,
+    after: { songId },
+  });
   return c.json({ ok: true });
 });
 
@@ -243,7 +278,13 @@ musicRoutes.post('/sets', async (c) => {
   const input = await body(c, setSchema);
   try {
     const id = await saveSet(c.env.DB, input as Parameters<typeof saveSet>[1], now);
-    await audit(c.env.DB, now, { userId: c.var.admin.userId, action: 'set_create', entity: 'set', entityId: id, after: input });
+    await audit(c.env.DB, now, {
+      userId: c.var.admin.userId,
+      action: 'set_create',
+      entity: 'set',
+      entityId: id,
+      after: input,
+    });
     return c.json({ id });
   } catch (error) {
     libraryFailure(error);
@@ -261,7 +302,14 @@ musicRoutes.put('/sets/:id', async (c) => {
   } catch (error) {
     libraryFailure(error);
   }
-  await audit(c.env.DB, now, { userId: c.var.admin.userId, action: 'set_update', entity: 'set', entityId: id, before, after: input });
+  await audit(c.env.DB, now, {
+    userId: c.var.admin.userId,
+    action: 'set_update',
+    entity: 'set',
+    entityId: id,
+    before,
+    after: input,
+  });
   return c.json({ ok: true });
 });
 
@@ -332,7 +380,7 @@ musicRoutes.post('/rounds/:id/invalidate', async (c) => {
   const roundId = idParam(c);
   const input = await body(c, z.object({ ipKeyPrefix: z.string().min(6).max(32) }));
   const result = await c.env.DB.prepare(
-    "UPDATE votes SET invalidated = 1 WHERE round_id = ?1 AND substr(ip_key, 1, length(?2)) = ?2 AND invalidated = 0",
+    'UPDATE votes SET invalidated = 1 WHERE round_id = ?1 AND substr(ip_key, 1, length(?2)) = ?2 AND invalidated = 0',
   )
     .bind(roundId, input.ipKeyPrefix)
     .run();
@@ -353,7 +401,12 @@ musicRoutes.post('/playback/:id/cancel', async (c) => {
     .bind(id)
     .run();
   if (result.meta.changes !== 1) fail(409, 'entry_not_cancellable');
-  await audit(c.env.DB, now, { userId: c.var.admin.userId, action: 'playback_cancel', entity: 'playback', entityId: id });
+  await audit(c.env.DB, now, {
+    userId: c.var.admin.userId,
+    action: 'playback_cancel',
+    entity: 'playback',
+    entityId: id,
+  });
   return c.json({ ok: true });
 });
 
@@ -362,7 +415,10 @@ musicRoutes.post('/playback/:id/move', async (c) => {
   const id = idParam(c);
   const { direction } = await body(c, z.object({ direction: z.enum(['up', 'down']) }));
   const db = c.env.DB;
-  const entry = await db.prepare("SELECT id, seq FROM playback WHERE id = ?1 AND status = 'planned'").bind(id).first<{ id: number; seq: number }>();
+  const entry = await db
+    .prepare("SELECT id, seq FROM playback WHERE id = ?1 AND status = 'planned'")
+    .bind(id)
+    .first<{ id: number; seq: number }>();
   if (!entry) fail(409, 'entry_not_movable');
   const neighbor = await db
     .prepare(
@@ -378,7 +434,13 @@ musicRoutes.post('/playback/:id/move', async (c) => {
     db.prepare('UPDATE playback SET seq = ?2 WHERE id = ?1').bind(neighbor.id, entry.seq),
     db.prepare('UPDATE playback SET seq = ?2 WHERE id = ?1').bind(entry.id, neighbor.seq),
   ]);
-  await audit(c.env.DB, now, { userId: c.var.admin.userId, action: 'playback_move', entity: 'playback', entityId: id, after: { direction } });
+  await audit(c.env.DB, now, {
+    userId: c.var.admin.userId,
+    action: 'playback_move',
+    entity: 'playback',
+    entityId: id,
+    after: { direction },
+  });
   return c.json({ ok: true });
 });
 
@@ -391,7 +453,10 @@ musicRoutes.post('/playback/insert', async (c) => {
       `SELECT seq FROM playback WHERE status IN ('queuing', 'queued', 'unknown', 'playing') ORDER BY seq DESC LIMIT 1`,
     )
     .first<{ seq: number }>();
-  const base = anchor?.seq ?? (await db.prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM playback').first<{ seq: number }>())?.seq ?? 0;
+  const base =
+    anchor?.seq ??
+    (await db.prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM playback').first<{ seq: number }>())?.seq ??
+    0;
   const free = await db
     .prepare(
       `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 9)
@@ -400,14 +465,22 @@ musicRoutes.post('/playback/insert', async (c) => {
     .bind(base)
     .first<{ seq: number }>();
   if (!free) fail(409, 'no_slot_available');
-  const round = await db.prepare('SELECT round_id FROM playback WHERE seq = ?1').bind(base).first<{ round_id: number | null }>();
+  const round = await db
+    .prepare('SELECT round_id FROM playback WHERE seq = ?1')
+    .bind(base)
+    .first<{ round_id: number | null }>();
   await db
     .prepare(
       `INSERT INTO playback (seq, round_id, song_id, source, position, status, created_at) VALUES (?1, ?2, ?3, 'manual', 0, 'planned', ?4)`,
     )
     .bind(free.seq, round?.round_id ?? null, songId, now)
     .run();
-  await audit(c.env.DB, now, { userId: c.var.admin.userId, action: 'playback_insert', entity: 'song', entityId: songId });
+  await audit(c.env.DB, now, {
+    userId: c.var.admin.userId,
+    action: 'playback_insert',
+    entity: 'song',
+    entityId: songId,
+  });
   return c.json({ ok: true });
 });
 
@@ -448,4 +521,33 @@ musicRoutes.post('/wishes/:id/decide', async (c) => {
   } catch (error) {
     libraryFailure(error);
   }
+});
+
+musicRoutes.get('/spotify/preshow-check', async (c) => {
+  const settings = await loadSettings(c.env.DB, c.var.rt.now());
+  const uri = settings.preshow.playlistUri;
+  if (!uri) return c.json({ checked: 0, overlaps: [] });
+  const id = uri.split(':')[2]!;
+  const tracks: SpotifyTrack[] = [];
+  for (let offset = 0, page = 0; page < 4; page++) {
+    const result = await c.var.rt.spotify.playlistPage(id, offset);
+    if (!result.ok) fail(422, `spotify_${result.kind}`);
+    tracks.push(...result.value.tracks);
+    if (result.value.next === null) break;
+    offset = result.value.next;
+  }
+  const overlaps: Array<{ title: string; artist: string }> = [];
+  for (let i = 0; i < tracks.length; i += 40) {
+    const rows = tracks.slice(i, i + 40);
+    const params = rows.flatMap((t) => [t.uri, t.isrc ?? '']);
+    const placeholders = rows.map((_, r) => `(?${r * 2 + 1}, ?${r * 2 + 2})`).join(', ');
+    const { results } = await c.env.DB.prepare(
+      `SELECT DISTINCT s.title, s.artist FROM songs s JOIN set_songs ss ON ss.song_id = s.id
+       JOIN (VALUES ${placeholders}) AS v ON s.spotify_uri = v.column1 OR (v.column2 <> '' AND s.isrc = v.column2)`,
+    )
+      .bind(...params)
+      .all<{ title: string; artist: string }>();
+    overlaps.push(...results);
+  }
+  return c.json({ checked: tracks.length, overlaps: overlaps.slice(0, 50) });
 });

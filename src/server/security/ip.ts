@@ -27,7 +27,11 @@ function isIpv4(address: string): boolean {
 }
 
 export function normalizeIp(raw: string | null | undefined): NormalizedIp {
-  const address = (raw ?? '').trim().replace(/^\[|\]$/g, '').split('%')[0] ?? '';
+  const address =
+    (raw ?? '')
+      .trim()
+      .replace(/^\[|\]$/g, '')
+      .split('%')[0] ?? '';
   if (isIpv4(address)) return { family: 'v4', key: `v4:${address}` };
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address);
   if (mapped?.[1] && isIpv4(mapped[1])) return { family: 'v4', key: `v4:${mapped[1]}` };
@@ -42,7 +46,10 @@ export function normalizeIp(raw: string | null | undefined): NormalizedIp {
   return { family: 'unknown', key: 'unknown' };
 }
 
-export async function ipKeyHash(secret: string, raw: string | null | undefined): Promise<{ family: IpFamily; hash: string }> {
+export async function ipKeyHash(
+  secret: string,
+  raw: string | null | undefined,
+): Promise<{ family: IpFamily; hash: string }> {
   const { family, key } = normalizeIp(raw);
   return { family, hash: (await hmacHex(secret, `ip:${key}`)).slice(0, 32) };
 }

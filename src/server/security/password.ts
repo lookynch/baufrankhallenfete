@@ -30,7 +30,9 @@ export function passwordProblem(password: string, username: string): string | nu
 async function derive(password: string, pepper: string, salt: Uint8Array<ArrayBuffer>, iterations: number) {
   const peppered = await hmacBytes(pepper, password);
   const key = await crypto.subtle.importKey('raw', peppered, 'PBKDF2', false, ['deriveBits']);
-  return new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, key, 256));
+  return new Uint8Array(
+    await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, key, 256),
+  );
 }
 
 export function iterationsFrom(value: string | undefined): number {

@@ -25,7 +25,10 @@ export const settingsSchemas = {
     allowExplicit: z.boolean(),
   }),
   preshow: z.object({
-    playlistUri: z.string().regex(/^spotify:playlist:[A-Za-z0-9]+$/).nullable(),
+    playlistUri: z
+      .string()
+      .regex(/^spotify:playlist:[A-Za-z0-9]+$/)
+      .nullable(),
     level: moodLevelSchema,
   }),
   nextRound: z.object({

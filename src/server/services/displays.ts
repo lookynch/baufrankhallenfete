@@ -15,7 +15,10 @@ export interface DisplayRow {
   last_seen_at: number | null;
 }
 
-export async function startPairing(db: D1Database, now: number): Promise<{ code: string; secret: string; expiresAt: number }> {
+export async function startPairing(
+  db: D1Database,
+  now: number,
+): Promise<{ code: string; secret: string; expiresAt: number }> {
   await db.prepare('DELETE FROM display_pairings WHERE expires_at < ?1').bind(now).run();
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = randomDigits(6);
@@ -82,7 +85,11 @@ export async function pollPairing(
 
 const lastSeenWrites = new Map<number, number>();
 
-export async function authenticateDisplay(db: D1Database, token: string | undefined, now: number): Promise<DisplayRow | null> {
+export async function authenticateDisplay(
+  db: D1Database,
+  token: string | undefined,
+  now: number,
+): Promise<DisplayRow | null> {
   if (!token || token.length > 100) return null;
   const display = await db
     .prepare('SELECT id, name, kind, last_seen_at FROM displays WHERE token_hash = ?1 AND revoked_at IS NULL')

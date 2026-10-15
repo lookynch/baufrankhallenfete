@@ -60,8 +60,7 @@ export async function totpCode(secret: string, step: number): Promise<string> {
   }
   const mac = await hmacSha1(base32Decode(secret), counter);
   const offset = mac[mac.length - 1]! & 15;
-  const binary =
-    ((mac[offset]! & 127) << 24) | (mac[offset + 1]! << 16) | (mac[offset + 2]! << 8) | mac[offset + 3]!;
+  const binary = ((mac[offset]! & 127) << 24) | (mac[offset + 1]! << 16) | (mac[offset + 2]! << 8) | mac[offset + 3]!;
   return String(binary % 10 ** DIGITS).padStart(DIGITS, '0');
 }
 

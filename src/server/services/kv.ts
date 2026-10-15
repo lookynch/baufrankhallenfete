@@ -28,9 +28,13 @@ export async function deleteKv(db: D1Database, key: string): Promise<void> {
 export async function tryLock(db: D1Database, key: string, now: number, ttlMs: number): Promise<boolean> {
   const lockKey = `lock:${key}`;
   const result = await db.batch([
-    db.prepare(`INSERT OR IGNORE INTO kv (key, value, updated_at, lock_until) VALUES (?1, 'null', ?2, 0)`).bind(lockKey, now),
     db
-      .prepare('UPDATE kv SET lock_until = ?2, updated_at = ?3 WHERE key = ?1 AND (lock_until IS NULL OR lock_until <= ?3)')
+      .prepare(`INSERT OR IGNORE INTO kv (key, value, updated_at, lock_until) VALUES (?1, 'null', ?2, 0)`)
+      .bind(lockKey, now),
+    db
+      .prepare(
+        'UPDATE kv SET lock_until = ?2, updated_at = ?3 WHERE key = ?1 AND (lock_until IS NULL OR lock_until <= ?3)',
+      )
       .bind(lockKey, now + ttlMs, now),
   ]);
   return (result[1]?.meta.changes ?? 0) === 1;

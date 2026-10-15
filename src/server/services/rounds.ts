@@ -46,7 +46,10 @@ export function expectedCloseAt(round: RoundRow, schedule: ScheduledEntry[]): nu
   if (round.close_at !== null) return round.close_at;
   const last = schedule[schedule.length - 1];
   if (!last) return round.opened_at + MIN_OPEN_MS;
-  return Math.max(round.opened_at + MIN_OPEN_MS, last.status === 'playing' ? last.scheduledStart : last.scheduledStart + 10_000);
+  return Math.max(
+    round.opened_at + MIN_OPEN_MS,
+    last.status === 'playing' ? last.scheduledStart : last.scheduledStart + 10_000,
+  );
 }
 
 export function closeDue(round: RoundRow, schedule: ScheduledEntry[], now: number): boolean {

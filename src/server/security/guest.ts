@@ -23,7 +23,11 @@ export async function encodeGuest(secret: string, identity: GuestIdentity): Prom
   return signValue(secret, 'guest', payload);
 }
 
-export async function decodeGuest(secret: string, value: string | undefined, now: number): Promise<GuestIdentity | null> {
+export async function decodeGuest(
+  secret: string,
+  value: string | undefined,
+  now: number,
+): Promise<GuestIdentity | null> {
   const payload = await verifySignedValue<GuestPayload>(secret, 'guest', value);
   if (!payload || typeof payload.d !== 'string' || typeof payload.e !== 'number' || payload.e < now) return null;
   return { deviceId: payload.d, verified: payload.v === 1, expiresAt: payload.e };

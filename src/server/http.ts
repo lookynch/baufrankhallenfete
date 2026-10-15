@@ -13,7 +13,11 @@ export interface AppVariables {
 export type AppEnv = { Bindings: Env; Variables: AppVariables };
 export type AppContext = Context<AppEnv>;
 
-export function fail(status: 400 | 401 | 403 | 404 | 409 | 413 | 422 | 429 | 500 | 502 | 503, error: string, extra?: object): never {
+export function fail(
+  status: 400 | 401 | 403 | 404 | 409 | 413 | 422 | 429 | 500 | 502 | 503,
+  error: string,
+  extra?: object,
+): never {
   throw new HTTPException(status, { res: Response.json({ error, ...extra }, { status }) });
 }
 
@@ -30,7 +34,9 @@ export async function body<T extends z.ZodType>(c: AppContext, schema: T, maxByt
   }
   const parsed = schema.safeParse(json);
   if (!parsed.success) {
-    fail(400, 'invalid_input', { issues: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })) });
+    fail(400, 'invalid_input', {
+      issues: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+    });
   }
   return parsed.data;
 }

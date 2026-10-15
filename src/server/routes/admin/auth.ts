@@ -113,7 +113,13 @@ async function loadInvite(db: D1Database, token: string, now: number) {
       'SELECT token_hash, username, display_name, role, expires_at FROM admin_invites WHERE token_hash = ?1 AND used_at IS NULL AND expires_at > ?2',
     )
     .bind(await sha256Hex(token), now)
-    .first<{ token_hash: string; username: string; display_name: string; role: 'owner' | 'admin'; expires_at: number }>();
+    .first<{
+      token_hash: string;
+      username: string;
+      display_name: string;
+      role: 'owner' | 'admin';
+      expires_at: number;
+    }>();
 }
 
 async function recoveryHash(pepper: string, code: string): Promise<string> {
@@ -156,12 +162,19 @@ authRoutes.post('/bootstrap', async (c) => {
     z.object({ token: z.string().max(200), username: usernameSchema, displayName: z.string().trim().min(1).max(60) }),
   );
   if (!timingSafeEqual(input.token, c.env.BOOTSTRAP_TOKEN)) fail(403, 'invalid_bootstrap_token');
-  const owners = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM admin_users WHERE role = 'owner' AND disabled = 0").first<{
+  const owners = await c.env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM admin_users WHERE role = 'owner' AND disabled = 0",
+  ).first<{
     n: number;
   }>();
   if ((owners?.n ?? 0) > 0) fail(409, 'already_bootstrapped');
   const token = await createInvite(c.env.DB, { ...input, role: 'owner' }, null, now);
-  await audit(c.env.DB, now, { userId: null, action: 'bootstrap_invite', entity: 'admin_invite', after: { username: input.username } });
+  await audit(c.env.DB, now, {
+    userId: null,
+    action: 'bootstrap_invite',
+    entity: 'admin_invite',
+    after: { username: input.username },
+  });
   return c.json({ invitePath: `/admin/invite#${token}` });
 });
 
@@ -170,7 +183,12 @@ authRoutes.post('/invite/info', async (c) => {
   const { token } = await body(c, z.object({ token: z.string().min(20).max(100) }));
   const invite = await loadInvite(c.env.DB, token, c.var.rt.now());
   if (!invite) fail(404, 'invite_invalid');
-  return c.json({ username: invite.username, displayName: invite.display_name, role: invite.role, expiresAt: invite.expires_at });
+  return c.json({
+    username: invite.username,
+    displayName: invite.display_name,
+    role: invite.role,
+    expiresAt: invite.expires_at,
+  });
 });
 
 authRoutes.post('/invite/setup', async (c) => {
@@ -204,13 +222,21 @@ authRoutes.post('/invite/complete', async (c) => {
   if (!invite) fail(404, 'invite_invalid');
   const problem = passwordProblem(input.password, invite.username);
   if (problem) fail(422, problem);
-  const setup = await verifySignedValue<{ s: string; i: string; e: number }>(c.env.COOKIE_SECRET, 'totp-setup', input.setupToken);
+  const setup = await verifySignedValue<{ s: string; i: string; e: number }>(
+    c.env.COOKIE_SECRET,
+    'totp-setup',
+    input.setupToken,
+  );
   if (!setup || setup.i !== invite.token_hash || setup.e < now) fail(422, 'setup_expired');
   const secret = await decrypt(c.env.ENC_KEY, setup.s);
   const step = await verifyTotp(secret, input.code, now, 0);
   if (step === null) fail(422, 'invalid_code');
 
-  const passwordHash = await hashPassword(input.password, c.env.SESSION_PEPPER, iterationsFrom(c.env.PBKDF2_ITERATIONS));
+  const passwordHash = await hashPassword(
+    input.password,
+    c.env.SESSION_PEPPER,
+    iterationsFrom(c.env.PBKDF2_ITERATIONS),
+  );
   const secretEnc = await encrypt(c.env.ENC_KEY, secret);
   const db = c.env.DB;
   const claimed = await db
@@ -235,7 +261,9 @@ authRoutes.post('/invite/complete', async (c) => {
   await db.batch([
     db.prepare('DELETE FROM admin_sessions WHERE user_id = ?1').bind(user.id),
     db.prepare('DELETE FROM admin_recovery_codes WHERE user_id = ?1').bind(user.id),
-    ...hashes.map((h) => db.prepare('INSERT INTO admin_recovery_codes (user_id, code_hash) VALUES (?1, ?2)').bind(user.id, h)),
+    ...hashes.map((h) =>
+      db.prepare('INSERT INTO admin_recovery_codes (user_id, code_hash) VALUES (?1, ?2)').bind(user.id, h),
+    ),
     auditStatement(db, now, { userId: user.id, action: 'invite_completed', entity: 'admin_user', entityId: user.id }),
   ]);
   await issueSession(c, user.id);
@@ -248,7 +276,11 @@ authRoutes.post('/login', async (c) => {
   await rateLimit(c, `login-ip:${ipHash}`, 30, 900);
   const input = await body(
     c,
-    z.object({ username: z.string().trim().max(40), password: z.string().max(256), turnstile: z.string().max(4096).optional() }),
+    z.object({
+      username: z.string().trim().max(40),
+      password: z.string().max(256),
+      turnstile: z.string().max(4096).optional(),
+    }),
   );
   await rateLimit(c, `login:${input.username.toLowerCase()}:${ipHash}`, 5, 900);
   if (c.env.TURNSTILE_SECRET && !(await verifyTurnstile(c.env.TURNSTILE_SECRET, input.turnstile, clientIp(c)))) {
@@ -264,18 +296,33 @@ authRoutes.post('/login', async (c) => {
   }
   const verified = await verifyPassword(input.password, user.password_hash, c.env.SESSION_PEPPER);
   if (!verified.ok) {
-    await audit(c.env.DB, now, { userId: user.id, action: 'login_failed', entity: 'admin_user', entityId: user.id, ipHash });
+    await audit(c.env.DB, now, {
+      userId: user.id,
+      action: 'login_failed',
+      entity: 'admin_user',
+      entityId: user.id,
+      ipHash,
+    });
     fail(401, 'invalid_credentials');
   }
   if (verified.iterations !== iterations) {
     const rehashed = await hashPassword(input.password, c.env.SESSION_PEPPER, iterations);
     await c.env.DB.prepare('UPDATE admin_users SET password_hash = ?2 WHERE id = ?1').bind(user.id, rehashed).run();
   }
-  const ticket = await signValue(c.env.COOKIE_SECRET, 'login-ticket', { u: user.id, e: now + LOGIN_TICKET_MS, n: randomToken(8) });
+  const ticket = await signValue(c.env.COOKIE_SECRET, 'login-ticket', {
+    u: user.id,
+    e: now + LOGIN_TICKET_MS,
+    n: randomToken(8),
+  });
   return c.json({ ticket });
 });
 
-async function verifySecondFactor(c: AppContext, user: UserRow, code: string | undefined, recovery: string | undefined) {
+async function verifySecondFactor(
+  c: AppContext,
+  user: UserRow,
+  code: string | undefined,
+  recovery: string | undefined,
+) {
   const now = c.var.rt.now();
   const db = c.env.DB;
   if (code) {
@@ -315,10 +362,17 @@ authRoutes.post('/verify', async (c) => {
   const ticket = await verifySignedValue<{ u: number; e: number }>(c.env.COOKIE_SECRET, 'login-ticket', input.ticket);
   if (!ticket || ticket.e < now) fail(401, 'login_expired');
   await rateLimit(c, `totp:${ticket.u}`, 6, 900);
-  const user = await c.env.DB.prepare('SELECT * FROM admin_users WHERE id = ?1 AND disabled = 0').bind(ticket.u).first<UserRow>();
+  const user = await c.env.DB.prepare('SELECT * FROM admin_users WHERE id = ?1 AND disabled = 0')
+    .bind(ticket.u)
+    .first<UserRow>();
   if (!user) fail(401, 'login_expired');
   if (!(await verifySecondFactor(c, user, input.code, input.recoveryCode))) {
-    await audit(c.env.DB, now, { userId: user.id, action: 'second_factor_failed', entity: 'admin_user', entityId: user.id });
+    await audit(c.env.DB, now, {
+      userId: user.id,
+      action: 'second_factor_failed',
+      entity: 'admin_user',
+      entityId: user.id,
+    });
     fail(401, 'invalid_code');
   }
   await c.env.DB.batch([
@@ -343,7 +397,9 @@ authRoutes.post('/logout', requireAdmin, async (c) => {
 
 authRoutes.get('/me', requireAdmin, async (c) => {
   const admin = c.var.admin;
-  const recovery = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM admin_recovery_codes WHERE user_id = ?1 AND used_at IS NULL')
+  const recovery = await c.env.DB.prepare(
+    'SELECT COUNT(*) AS n FROM admin_recovery_codes WHERE user_id = ?1 AND used_at IS NULL',
+  )
     .bind(admin.userId)
     .first<{ n: number }>();
   return c.json({
@@ -360,7 +416,9 @@ authRoutes.post('/reauth', requireAdmin, async (c) => {
   const now = c.var.rt.now();
   await rateLimit(c, `totp:${c.var.admin.userId}`, 6, 900);
   const { code } = await body(c, z.object({ code: z.string().regex(/^\d{6}$/) }));
-  const user = await c.env.DB.prepare('SELECT * FROM admin_users WHERE id = ?1').bind(c.var.admin.userId).first<UserRow>();
+  const user = await c.env.DB.prepare('SELECT * FROM admin_users WHERE id = ?1')
+    .bind(c.var.admin.userId)
+    .first<UserRow>();
   if (!user || !(await verifySecondFactor(c, user, code, undefined))) fail(401, 'invalid_code');
   await markReauth(c.env.DB, c.var.admin.sessionHash, now);
   return c.json({ ok: true });

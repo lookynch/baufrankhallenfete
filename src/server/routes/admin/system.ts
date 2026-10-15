@@ -57,9 +57,15 @@ systemRoutes.get('/dashboard', async (c) => {
     spotify: await authStatus(c.env),
     snapshot,
     nowPlaying: nowPlayingView(snapshot),
-    round: round ? { id: round.id, seq: round.seq, level: round.mood_level, expectedCloseAt: expectedCloseAt(round, schedule) } : null,
+    round: round
+      ? { id: round.id, seq: round.seq, level: round.mood_level, expectedCloseAt: expectedCloseAt(round, schedule) }
+      : null,
     upNext: upNextView(schedule, 10),
-    agents: agents.results.map((a) => ({ id: a.key.slice(6), ...(JSON.parse(a.value) as object), updatedAt: a.updated_at })),
+    agents: agents.results.map((a) => ({
+      id: a.key.slice(6),
+      ...(JSON.parse(a.value) as object),
+      updatedAt: a.updated_at,
+    })),
     displays: displays.results,
     budget: await readBudget(db),
     ipLimitRejections: await peekRateLimit(db, 'stat:ip_limit_rejections', 86_400, now),
@@ -80,7 +86,13 @@ systemRoutes.put('/settings/:key', async (c) => {
   const patch = await body(c, z.record(z.string(), z.unknown()));
   try {
     const change = await saveSettings(c.env.DB, key as SettingsKey, patch, now, c.var.admin.userId);
-    await audit(c.env.DB, now, { userId: c.var.admin.userId, action: 'settings_update', entity: 'settings', entityId: key, ...change });
+    await audit(c.env.DB, now, {
+      userId: c.var.admin.userId,
+      action: 'settings_update',
+      entity: 'settings',
+      entityId: key,
+      ...change,
+    });
     return c.json(change.after);
   } catch (error) {
     if (error instanceof SettingsError) fail(422, error.message);
@@ -119,7 +131,13 @@ systemRoutes.post('/ledger/entries', async (c) => {
   );
   try {
     const id = await bookManual(c.env.DB, { ...input, effectiveAt: input.effectiveAt ?? now }, c.var.admin.userId, now);
-    await audit(c.env.DB, now, { userId: c.var.admin.userId, action: 'ledger_book', entity: 'ledger_entry', entityId: id, after: input });
+    await audit(c.env.DB, now, {
+      userId: c.var.admin.userId,
+      action: 'ledger_book',
+      entity: 'ledger_entry',
+      entityId: id,
+      after: input,
+    });
     return c.json({ id, bookingNo: bookingNo(id) });
   } catch (error) {
     if (error instanceof LedgerError) fail(422, error.message);
@@ -153,7 +171,10 @@ systemRoutes.put('/ledger/accounts/:code', async (c) => {
   if (!/^[A-Za-z0-9]{1,10}$/.test(code)) fail(400, 'invalid_account');
   const input = await body(
     c,
-    z.object({ name: z.string().trim().min(1).max(80), type: z.enum(['asset', 'liability', 'expense', 'income', 'equity']) }),
+    z.object({
+      name: z.string().trim().min(1).max(80),
+      type: z.enum(['asset', 'liability', 'expense', 'income', 'equity']),
+    }),
   );
   const before = await c.env.DB.prepare('SELECT * FROM ledger_accounts WHERE code = ?1').bind(code).first();
   await c.env.DB.prepare(
@@ -162,7 +183,14 @@ systemRoutes.put('/ledger/accounts/:code', async (c) => {
   )
     .bind(code, input.name, input.type)
     .run();
-  await audit(c.env.DB, now, { userId: c.var.admin.userId, action: 'account_save', entity: 'ledger_account', entityId: code, before, after: input });
+  await audit(c.env.DB, now, {
+    userId: c.var.admin.userId,
+    action: 'account_save',
+    entity: 'ledger_account',
+    entityId: code,
+    before,
+    after: input,
+  });
   return c.json({ ok: true });
 });
 
@@ -174,7 +202,19 @@ function csvCell(value: unknown): string {
 
 systemRoutes.get('/ledger/export.csv', async (c) => {
   const entries = (await journal(c.env.DB, 100_000)).reverse();
-  const header = ['Belegnr', 'Gebucht', 'Wirksam', 'Art', 'Soll', 'Haben', 'Betrag EUR', 'Kästen', 'Text', 'Storno von', 'Erfasst von'];
+  const header = [
+    'Belegnr',
+    'Gebucht',
+    'Wirksam',
+    'Art',
+    'Soll',
+    'Haben',
+    'Betrag EUR',
+    'Kästen',
+    'Text',
+    'Storno von',
+    'Erfasst von',
+  ];
   const lines = entries.map((e) =>
     [
       e.booking_no,
@@ -192,7 +232,7 @@ systemRoutes.get('/ledger/export.csv', async (c) => {
       .map(csvCell)
       .join(';'),
   );
-  return new Response(`﻿${[header.join(';'), ...lines].join('\r\n')}`, {
+  return new Response(`\u{FEFF}${[header.join(';'), ...lines].join('\r\n')}`, {
     headers: {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': 'attachment; filename="verbrauchsprotokoll-fete.csv"',
@@ -225,7 +265,13 @@ systemRoutes.post('/displays/claim', async (c) => {
   );
   try {
     const id = await claimPairing(c.env.DB, c.env.ENC_KEY, input, c.var.admin.userId, now);
-    await audit(c.env.DB, now, { userId: c.var.admin.userId, action: 'display_pair', entity: 'display', entityId: id, after: input });
+    await audit(c.env.DB, now, {
+      userId: c.var.admin.userId,
+      action: 'display_pair',
+      entity: 'display',
+      entityId: id,
+      after: input,
+    });
     return c.json({ id });
   } catch (error) {
     if (error instanceof DisplayError) fail(404, error.message);
@@ -236,7 +282,9 @@ systemRoutes.post('/displays/claim', async (c) => {
 systemRoutes.post('/displays/:id/revoke', async (c) => {
   const now = c.var.rt.now();
   const id = idParam(c);
-  await c.env.DB.prepare('UPDATE displays SET revoked_at = ?2 WHERE id = ?1 AND revoked_at IS NULL').bind(id, now).run();
+  await c.env.DB.prepare('UPDATE displays SET revoked_at = ?2 WHERE id = ?1 AND revoked_at IS NULL')
+    .bind(id, now)
+    .run();
   await audit(c.env.DB, now, { userId: c.var.admin.userId, action: 'display_revoke', entity: 'display', entityId: id });
   return c.json({ ok: true });
 });
@@ -309,7 +357,13 @@ ownerRoutes.post('/users/invite', async (c) => {
     }),
   );
   const token = await createInvite(c.env.DB, input, c.var.admin.userId, now);
-  await audit(c.env.DB, now, { userId: c.var.admin.userId, action: 'user_invite', entity: 'admin_user', entityId: input.username, after: input });
+  await audit(c.env.DB, now, {
+    userId: c.var.admin.userId,
+    action: 'user_invite',
+    entity: 'admin_user',
+    entityId: input.username,
+    after: input,
+  });
   return c.json({ invitePath: `/admin/invite#${token}` });
 });
 
@@ -331,7 +385,12 @@ ownerRoutes.post('/users/:id/:action{disable|enable}', async (c) => {
   await db.batch([
     db.prepare('UPDATE admin_users SET disabled = ?2 WHERE id = ?1').bind(id, disable ? 1 : 0),
     ...(disable ? [db.prepare('DELETE FROM admin_sessions WHERE user_id = ?1').bind(id)] : []),
-    auditStatement(db, now, { userId: c.var.admin.userId, action: disable ? 'user_disable' : 'user_enable', entity: 'admin_user', entityId: id }),
+    auditStatement(db, now, {
+      userId: c.var.admin.userId,
+      action: disable ? 'user_disable' : 'user_enable',
+      entity: 'admin_user',
+      entityId: id,
+    }),
   ]);
   return c.json({ ok: true });
 });
@@ -339,7 +398,12 @@ ownerRoutes.post('/users/:id/:action{disable|enable}', async (c) => {
 ownerRoutes.post('/users/:id/revoke-sessions', async (c) => {
   const id = idParam(c);
   await c.env.DB.prepare('DELETE FROM admin_sessions WHERE user_id = ?1').bind(id).run();
-  await audit(c.env.DB, c.var.rt.now(), { userId: c.var.admin.userId, action: 'user_revoke_sessions', entity: 'admin_user', entityId: id });
+  await audit(c.env.DB, c.var.rt.now(), {
+    userId: c.var.admin.userId,
+    action: 'user_revoke_sessions',
+    entity: 'admin_user',
+    entityId: id,
+  });
   return c.json({ ok: true });
 });
 

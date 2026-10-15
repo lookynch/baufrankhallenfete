@@ -25,13 +25,20 @@ async function verifiedBody(c: AppContext): Promise<{ agentId: string; json: unk
   const signature = c.req.header('X-Fete-Signature') ?? '';
   const agentId = c.req.header('X-Fete-Agent') ?? '';
   if (!/^[A-Za-z0-9._-]{1,40}$/.test(agentId)) fail(422, 'invalid_agent');
-  const expected = await buzzerSignature(c.env.BUZZER_HMAC_SECRET, c.req.method, new URL(c.req.url).pathname, timestamp, raw);
+  const expected = await buzzerSignature(
+    c.env.BUZZER_HMAC_SECRET,
+    c.req.method,
+    new URL(c.req.url).pathname,
+    timestamp,
+    raw,
+  );
   if (!timingSafeEqual(signature.toLowerCase(), expected)) {
     const limited = await hitRateLimit(c.env.DB, failures, 20, 600, now);
     fail(limited.allowed ? 401 : 429, 'bad_signature', { server_time: now });
   }
   const sentAt = Number(timestamp);
-  if (!Number.isFinite(sentAt) || Math.abs(now - sentAt) > MAX_SKEW_MS) fail(401, 'stale_timestamp', { server_time: now });
+  if (!Number.isFinite(sentAt) || Math.abs(now - sentAt) > MAX_SKEW_MS)
+    fail(401, 'stale_timestamp', { server_time: now });
   try {
     return { agentId, json: JSON.parse(raw) };
   } catch {

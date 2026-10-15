@@ -133,7 +133,11 @@ export async function signValue(secret: string, purpose: string, payload: unknow
   return `${body}.${await hmacBase64Url(secret, `${purpose}:${body}`)}`;
 }
 
-export async function verifySignedValue<T>(secret: string, purpose: string, token: string | undefined): Promise<T | null> {
+export async function verifySignedValue<T>(
+  secret: string,
+  purpose: string,
+  token: string | undefined,
+): Promise<T | null> {
   if (!token) return null;
   const [body, signature] = token.split('.');
   if (!body || !signature) return null;
