@@ -1,0 +1,4 @@
+/.github/ @lookynch
+/migrations/ @lookynch
+/src/server/security/ @lookynch
+/wrangler.toml @lookynch
