@@ -39,7 +39,18 @@ const messages: Record<string, string> = {
   preshow_playlist_missing: 'Keine Vorprogramm-Playlist in den Einstellungen.',
   already_reversed: 'Buchung wurde bereits storniert.',
   cannot_reverse_reversal: 'Ein Storno kann nicht storniert werden.',
-  last_owner: 'Der letzte Owner kann nicht deaktiviert werden.',
+  last_owner: 'Der letzte aktive Owner kann nicht gesperrt oder zum Admin herabgestuft werden.',
+  username_exists: 'Benutzername existiert bereits – zum Zurücksetzen ausdrücklich bestätigen.',
+  user_disabled: 'Dieser Zugang ist gesperrt – erst entsperren, dann neu einladen.',
+  invite_revoked: 'Einladung wurde widerrufen. Bitte einen neuen Link anfordern.',
+  ledger_accounts_must_differ: 'Vorrats-, Aufwands- und Verbindlichkeitskonto müssen verschieden sein.',
+  unknown_ledger_account: 'Unbekanntes Konto – erst unter Buchhaltung anlegen.',
+  event_end_before_start: 'Das Event-Ende muss nach dem Beginn liegen.',
+  voting_end_before_start: 'Das Voting-Ende muss nach dem Voting-Start liegen.',
+  song_already_scheduled: 'Der Song ist bereits eingeplant.',
+  song_is_round_candidate: 'Der Song steht gerade zur Wahl.',
+  entry_not_movable: 'Dieser Eintrag kann nicht verschoben werden.',
+  invalid_account: 'Ungültiges Konto.',
   cannot_disable_self: 'Du kannst dich nicht selbst deaktivieren.',
   entry_not_cancellable: 'Nur geplante Songs können entfernt werden.',
   invalid_spotify_reference: 'Kein gültiger Spotify-Link.',
@@ -188,6 +199,23 @@ export function Modal({ title, children, onClose }: { title: string; children: R
       </div>
     </div>
   );
+}
+
+export function useInFlight() {
+  const active = useRef(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const guard = useCallback(async (key: string, action: () => Promise<unknown>): Promise<void> => {
+    if (active.current) return;
+    active.current = true;
+    setBusy(key);
+    try {
+      await action();
+    } finally {
+      active.current = false;
+      setBusy(null);
+    }
+  }, []);
+  return { busy, guard };
 }
 
 export function useAdminData<T>(path: string | null, intervalMs?: number) {

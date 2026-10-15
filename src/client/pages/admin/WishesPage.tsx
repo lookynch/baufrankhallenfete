@@ -3,7 +3,7 @@ import { Cover, MoodBadge } from '../../components/music.tsx';
 import { Badge, Button, Card, Empty, Select, Spinner } from '../../components/ui.tsx';
 import { api } from '../../lib/api.ts';
 import { formatTime } from '../../lib/time.ts';
-import { LevelPicker, PageTitle, useAdmin, useAdminData } from './shared.tsx';
+import { LevelPicker, PageTitle, useAdmin, useAdminData, useInFlight } from './shared.tsx';
 
 interface Wish {
   id: number;
@@ -75,15 +75,19 @@ function WishCard({
   onDone: () => Promise<void>;
 }) {
   const { run } = useAdmin();
-  const [setId, setSetId] = useState(String(sets[0]?.id ?? ''));
+  const { busy, guard } = useInFlight();
+  const [setId, setSetId] = useState('');
   const [level, setLevel] = useState<number | null>(wish.mood_level);
-  async function decide(approve: boolean) {
-    const body = approve ? { approve: true, setId: Number(setId), level } : { approve: false };
-    await run(
-      () => api.post(`/api/admin/wishes/${wish.id}/decide`, body),
-      approve ? `${wish.key} freigegeben` : `${wish.key} abgelehnt`,
-    );
-    await onDone();
+  const effectiveSetId = sets.some((s) => String(s.id) === setId) ? setId : String(sets[0]?.id ?? '');
+  function decide(approve: boolean) {
+    return guard(approve ? 'approve' : 'reject', async () => {
+      const body = approve ? { approve: true, setId: Number(effectiveSetId), level } : { approve: false };
+      await run(
+        () => api.post(`/api/admin/wishes/${wish.id}/decide`, body),
+        approve ? `${wish.key} freigegeben` : `${wish.key} abgelehnt`,
+      );
+      await onDone();
+    });
   }
   return (
     <Card>
@@ -104,7 +108,7 @@ function WishCard({
       </div>
       {wish.status === 'open' ? (
         <div className="mt-4 flex flex-col gap-3">
-          <Select value={setId} onChange={(e) => setSetId(e.target.value)}>
+          <Select value={effectiveSetId} onChange={(e) => setSetId(e.target.value)}>
             {sets.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name} (Standard {s.default_level})
@@ -113,10 +117,20 @@ function WishCard({
           </Select>
           <LevelPicker value={level} allowNull onChange={setLevel} />
           <div className="flex gap-2">
-            <Button className="flex-1" disabled={!setId} onClick={() => void decide(true)}>
+            <Button
+              className="flex-1"
+              busy={busy === 'approve'}
+              disabled={!effectiveSetId || busy !== null}
+              onClick={() => void decide(true)}
+            >
               Freigeben
             </Button>
-            <Button variant="danger" onClick={() => void decide(false)}>
+            <Button
+              variant="danger"
+              busy={busy === 'reject'}
+              disabled={busy !== null}
+              onClick={() => void decide(false)}
+            >
               Ablehnen
             </Button>
           </div>

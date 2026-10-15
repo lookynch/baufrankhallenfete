@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Spinner } from '../../components/ui.tsx';
 import { api, ApiError } from '../../lib/api.ts';
 import { useI18n } from '../../lib/i18n.tsx';
@@ -19,7 +19,7 @@ export function DisplayApp() {
   const { data, error, offline, offsetMs, refresh } = usePolling(load, { tick: true });
   const { t } = useI18n();
 
-  if (error?.status === 401) return <Pairing onPaired={() => void refresh()} />;
+  if (error?.status === 401) return <Pairing onPaired={refresh} />;
   if (!data) {
     return (
       <main className="grid min-h-dvh place-items-center bg-bg">
@@ -42,8 +42,12 @@ export function DisplayApp() {
   );
 }
 
-function Pairing({ onPaired }: { onPaired: () => void }) {
+function Pairing({ onPaired }: { onPaired: () => Promise<void> }) {
   const { t } = useI18n();
+  const onPairedRef = useRef(onPaired);
+  onPairedRef.current = onPaired;
+  const tRef = useRef(t);
+  tRef.current = t;
   const [pairing, setPairing] = useState<{ code: string; secret: string; expiresAt: number } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -66,9 +70,9 @@ function Pairing({ onPaired }: { onPaired: () => void }) {
         try {
           const result = await api.post<{ status: string }>('/api/display/pair/poll', current);
           if (cancelled) return;
-          if (result.status === 'paired') return onPaired();
+          if (result.status === 'paired') return void onPairedRef.current();
           if (result.status === 'expired') {
-            setMessage(t('display.pair.expired'));
+            setMessage(tRef.current('display.pair.expired'));
             return void start();
           }
           poll(current);
@@ -83,7 +87,7 @@ function Pairing({ onPaired }: { onPaired: () => void }) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [onPaired, t]);
+  }, []);
 
   return (
     <main className="bg-party flex min-h-dvh flex-col items-center justify-center gap-8 px-6 text-center">

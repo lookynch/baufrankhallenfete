@@ -73,16 +73,22 @@ export function computeSchedule(
   now: number,
   snapshot: StoredSnapshot | null,
 ): ScheduledEntry[] {
-  const track = snapshotFresh(snapshot, now) ? snapshot.snapshot?.track : null;
-  const foreignEndsAt =
-    track && snapshot?.snapshot && !entries.some((e) => e.status === 'playing')
-      ? snapshot.fetchedAt + track.durationMs - snapshot.snapshot.progressMs
+  const fresh = snapshotFresh(snapshot, now) ? snapshot : null;
+  const observed = fresh?.snapshot ?? null;
+  const observedEndsAt =
+    fresh && observed?.track
+      ? (observed.isPlaying ? fresh.fetchedAt : now) + observed.track.durationMs - observed.progressMs
       : null;
+  const foreignEndsAt = entries.some((e) => e.status === 'playing') ? null : observedEndsAt;
   let cursor: number | null = null;
   return entries.map((entry) => {
     let start: number;
     if (entry.status === 'playing' && entry.started_at !== null) {
       start = entry.started_at;
+      if (observed && observedEndsAt !== null && matchesEntry(observed, entry)) {
+        cursor = Math.max(start + entry.duration_ms, observedEndsAt);
+        return { ...entry, scheduledStart: start, scheduledEnd: cursor };
+      }
     } else {
       start = Math.max(cursor ?? entry.anchor_at ?? now, entry.anchor_at ?? 0);
       if (cursor === null && foreignEndsAt !== null) start = Math.max(start, foreignEndsAt);
@@ -94,7 +100,10 @@ export function computeSchedule(
   });
 }
 
-function matchesEntry(snapshot: PlaybackSnapshot, entry: PlaybackEntry): boolean {
+function matchesEntry(
+  snapshot: PlaybackSnapshot,
+  entry: Pick<PlaybackEntry, 'spotify_uri' | 'isrc' | 'title_norm' | 'artist_norm' | 'duration_ms'>,
+): boolean {
   const track = snapshot.track;
   if (!track) return false;
   return tracksMatch(
@@ -161,6 +170,7 @@ export async function reconcile(
     return;
   } else {
     const matchingPlanned = entries.find((e) => e.status === 'planned' && matchesEntry(snapshot, e));
+    if (!playing && !matchingPlanned && (await lastFinishedMatches(db, snapshot))) return;
     if (playing) finish(playing);
     if (matchingPlanned) {
       statements.push(
@@ -170,7 +180,7 @@ export async function reconcile(
       );
     } else {
       const foreignStartedAt = fetchedAt - snapshot.progressMs;
-      if (pending && (playing || foreignStartedAt > (pending.queued_at ?? 0) + 2_000)) {
+      if (pending && snapshot.isPlaying && (playing || foreignStartedAt > (pending.queued_at ?? 0) + 2_000)) {
         const playedAt = await playedSince(spotify, pending);
         statements.push(
           playedAt !== null
@@ -195,6 +205,17 @@ export async function reconcile(
   if (statements.length) await db.batch(statements);
 }
 
+async function lastFinishedMatches(db: D1Database, snapshot: PlaybackSnapshot): Promise<boolean> {
+  const last = await db
+    .prepare(
+      `SELECT s.spotify_uri, s.isrc, s.title_norm, s.artist_norm, s.duration_ms
+       FROM playback p JOIN songs s ON s.id = p.song_id
+       WHERE p.status IN ('played', 'skipped') ORDER BY p.seq DESC LIMIT 1`,
+    )
+    .first<Pick<PlaybackEntry, 'spotify_uri' | 'isrc' | 'title_norm' | 'artist_norm' | 'duration_ms'>>();
+  return Boolean(last && matchesEntry(snapshot, last));
+}
+
 async function recordObservedPlay(
   db: D1Database,
   snapshot: PlaybackSnapshot,
@@ -213,7 +234,8 @@ async function recordObservedPlay(
 }
 
 export async function expireStale(db: D1Database, now: number, snapshot: StoredSnapshot | null): Promise<void> {
-  const observing = snapshotFresh(snapshot, now);
+  const observed = snapshotFresh(snapshot, now) ? snapshot.snapshot : null;
+  const observing = observed !== null;
   const schedule = computeSchedule(await activeEntries(db), now, snapshot);
   const statements: D1PreparedStatement[] = [];
   for (const entry of schedule) {
@@ -225,7 +247,8 @@ export async function expireStale(db: D1Database, now: number, snapshot: StoredS
     } else if (
       entry.status === 'playing' &&
       entry.started_at !== null &&
-      now > entry.started_at + entry.duration_ms + 60_000
+      now > entry.started_at + entry.duration_ms + 60_000 &&
+      !(observed && matchesEntry(observed, entry))
     ) {
       statements.push(
         db

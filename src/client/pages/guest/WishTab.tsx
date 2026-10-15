@@ -93,7 +93,8 @@ export function WishTab({ toast }: { toast: (message: string, tone?: 'success' |
   async function upvote(w: Wish) {
     setBusy(w.key);
     try {
-      await api.post(`/api/public/wishes/${w.id}/upvote`);
+      const result = await api.post<{ ok: boolean }>(`/api/public/wishes/${w.id}/upvote`);
+      if (!result.ok) toast(t('guest.wish.upvoteLimited'), 'danger');
       await loadWishes();
     } catch (e) {
       toast(t(guestErrorKey(e)), 'danger');

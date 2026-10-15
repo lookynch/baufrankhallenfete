@@ -7,7 +7,7 @@ import { randomToken, signValue, verifySignedValue } from '../../security/crypto
 import { audit } from '../../services/audit.ts';
 import { importTracks, LibraryError, listSets, saveSet, setCoverage, type SongRow } from '../../services/library.ts';
 import { activeEntries, computeSchedule } from '../../services/playback.ts';
-import { finalizeRound, openRound, tally } from '../../services/rounds.ts';
+import { finalizeRound, minCloseAt, openRound, tally, votingActive } from '../../services/rounds.ts';
 import { loadSettings } from '../../services/settings.ts';
 import { authorizeUrl, authStatus, clearTokens, exchangeCode, spotifyConfigured } from '../../services/spotify-auth.ts';
 import { parseSpotifyReference, type SpotifyTrack } from '../../services/spotify-api.ts';
@@ -263,7 +263,8 @@ musicRoutes.post('/sets/:setId/songs/:songId/add', async (c) => {
 });
 
 musicRoutes.get('/sets', async (c) => {
-  return c.json({ sets: await listSets(c.env.DB), coverage: await setCoverage(c.env.DB) });
+  const settings = await loadSettings(c.env.DB, c.var.rt.now());
+  return c.json({ sets: await listSets(c.env.DB), coverage: await setCoverage(c.env.DB, settings.voting) });
 });
 
 const setSchema = z.object({
@@ -355,11 +356,25 @@ musicRoutes.post('/rounds/:action{close|skip}', async (c) => {
   const settings = await loadSettings(c.env.DB, now);
   const round = await openRound(c.env.DB);
   if (!round) fail(409, 'no_open_round');
+  const skip = c.req.param('action') === 'skip';
+  const earliest = minCloseAt(round);
+  if (!skip && now < earliest) {
+    await c.env.DB.prepare("UPDATE rounds SET close_at = ?2 WHERE id = ?1 AND status = 'open'")
+      .bind(round.id, earliest)
+      .run();
+    await audit(c.env.DB, now, {
+      userId: c.var.admin.userId,
+      action: 'round_close_scheduled',
+      entity: 'round',
+      entityId: round.id,
+      after: { closeAt: earliest },
+    });
+    return c.json({ ok: true, closeAt: earliest });
+  }
   const schedule = computeSchedule(await activeEntries(c.env.DB), now, await readSnapshot(c.env.DB));
   const last = schedule[schedule.length - 1];
-  const skip = c.req.param('action') === 'skip';
   const done = await finalizeRound(c.env.DB, settings, round, now, {
-    createNext: true,
+    createNext: votingActive(settings, now),
     anchorAt: last && last.scheduledEnd > now ? last.scheduledEnd : now,
     skip,
   });
@@ -448,6 +463,22 @@ musicRoutes.post('/playback/insert', async (c) => {
   const now = c.var.rt.now();
   const { songId } = await body(c, z.object({ songId: z.number().int().positive() }));
   const db = c.env.DB;
+  const existing = await db
+    .prepare(
+      `SELECT
+         EXISTS (SELECT 1 FROM songs WHERE id = ?1) AS known,
+         EXISTS (
+           SELECT 1 FROM playback WHERE song_id = ?1 AND status IN ('planned', 'queuing', 'queued', 'unknown', 'playing')
+         ) AS scheduled,
+         EXISTS (
+           SELECT 1 FROM round_candidates c JOIN rounds r ON r.id = c.round_id WHERE r.status = 'open' AND c.song_id = ?1
+         ) AS candidate`,
+    )
+    .bind(songId)
+    .first<{ known: number; scheduled: number; candidate: number }>();
+  if (!existing?.known) fail(404, 'song_not_found');
+  if (existing.scheduled) fail(409, 'song_already_scheduled');
+  if (existing.candidate) fail(409, 'song_is_round_candidate');
   const anchor = await db
     .prepare(
       `SELECT seq FROM playback WHERE status IN ('queuing', 'queued', 'unknown', 'playing') ORDER BY seq DESC LIMIT 1`,

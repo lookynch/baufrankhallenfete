@@ -26,30 +26,44 @@ function isIpv4(address: string): boolean {
   return parts.length === 4 && parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255);
 }
 
-export function normalizeIp(raw: string | null | undefined): NormalizedIp {
-  const address =
+function cleanAddress(raw: string | null | undefined): string {
+  return (
     (raw ?? '')
       .trim()
       .replace(/^\[|\]$/g, '')
-      .split('%')[0] ?? '';
+      .split('%')[0] ?? ''
+  );
+}
+
+function v6Prefix(groups: number[], count: number): string {
+  return `v6:${groups
+    .slice(0, count)
+    .map((g) => g.toString(16))
+    .join(':')}::/${count * 16}`;
+}
+
+export function normalizeIp(raw: string | null | undefined): NormalizedIp {
+  const address = cleanAddress(raw);
   if (isIpv4(address)) return { family: 'v4', key: `v4:${address}` };
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address);
   if (mapped?.[1] && isIpv4(mapped[1])) return { family: 'v4', key: `v4:${mapped[1]}` };
   const groups = expandIpv6(address);
-  if (groups) {
-    const prefix = groups
-      .slice(0, 4)
-      .map((g) => g.toString(16))
-      .join(':');
-    return { family: 'v6', key: `v6:${prefix}::/64` };
-  }
+  if (groups) return { family: 'v6', key: v6Prefix(groups, 4) };
   return { family: 'unknown', key: 'unknown' };
+}
+
+export function networkKey(raw: string | null | undefined): string {
+  const normalized = normalizeIp(raw);
+  const groups = normalized.family === 'v6' ? expandIpv6(cleanAddress(raw)) : null;
+  return groups ? v6Prefix(groups, 3) : normalized.key;
 }
 
 export async function ipKeyHash(
   secret: string,
   raw: string | null | undefined,
-): Promise<{ family: IpFamily; hash: string }> {
+): Promise<{ family: IpFamily; hash: string; netHash: string }> {
   const { family, key } = normalizeIp(raw);
-  return { family, hash: (await hmacHex(secret, `ip:${key}`)).slice(0, 32) };
+  const net = networkKey(raw);
+  const hash = (await hmacHex(secret, `ip:${key}`)).slice(0, 32);
+  return { family, hash, netHash: net === key ? hash : (await hmacHex(secret, `ip:${net}`)).slice(0, 32) };
 }

@@ -217,7 +217,7 @@ describe('Bibliothek-Import und Abdeckung', () => {
 });
 
 describe('Display-Kopplung', () => {
-  it('gibt das Token nur mit passendem Geheimnis und nur einmal heraus', async () => {
+  it('gibt das Token nur mit passendem Geheimnis und nur innerhalb der Zustellfrist heraus', async () => {
     const env = testEnv();
     const pairing = await startPairing(env.DB, NOW);
     expect(await pollPairing(env.DB, env.ENC_KEY, pairing.code, pairing.secret, NOW)).toEqual({ status: 'pending' });
@@ -226,11 +226,14 @@ describe('Display-Kopplung', () => {
     );
     await claimPairing(env.DB, env.ENC_KEY, { code: pairing.code, name: 'TV', kind: 'tv' }, 1, NOW);
     expect(await pollPairing(env.DB, env.ENC_KEY, pairing.code, 'falsch'.repeat(5), NOW)).toEqual({
-      status: 'expired',
+      status: 'invalid',
     });
     const result = await pollPairing(env.DB, env.ENC_KEY, pairing.code, pairing.secret, NOW);
     expect(result.status).toBe('paired');
-    expect(await pollPairing(env.DB, env.ENC_KEY, pairing.code, pairing.secret, NOW)).toEqual({ status: 'expired' });
+    expect(await pollPairing(env.DB, env.ENC_KEY, pairing.code, pairing.secret, NOW + 1_000)).toEqual(result);
+    expect(await pollPairing(env.DB, env.ENC_KEY, pairing.code, pairing.secret, NOW + 3 * 60_000)).toEqual({
+      status: 'expired',
+    });
     const token = result.status === 'paired' ? result.token : '';
     expect(await authenticateDisplay(env.DB, token, NOW)).toMatchObject({ name: 'TV', kind: 'tv' });
     await env.DB.prepare('UPDATE displays SET revoked_at = 1').run();

@@ -37,6 +37,7 @@ export const settingsSchemas = {
   security: z.object({
     votesPerIpV4: z.number().int().min(1).max(50),
     votesPerIpV6: z.number().int().min(1).max(50),
+    votesPerNetV6: z.number().int().min(1).max(200),
   }),
   ledger: z.object({
     cratePriceCents: z.number().int().min(1).max(100_000),
@@ -59,10 +60,14 @@ export const settingsSchemas = {
 export type SettingsKey = keyof typeof settingsSchemas;
 export type Settings = { [K in SettingsKey]: z.infer<(typeof settingsSchemas)[K]> };
 
-export function defaultSettings(now: number): Settings {
-  const evening = new Date(now);
+export function defaultEventStart(now: number): number {
+  const evening = new Date(now - 12 * 60 * MINUTE);
   evening.setUTCHours(17, 0, 0, 0);
-  const start = evening.getTime();
+  return evening.getTime();
+}
+
+export function defaultSettings(now: number): Settings {
+  const start = defaultEventStart(now);
   return {
     event: { name: 'Baufrankhallen-Fete', startsAt: start, endsAt: start + 7 * 60 * MINUTE },
     voting: {
@@ -77,7 +82,7 @@ export function defaultSettings(now: number): Settings {
     },
     preshow: { playlistUri: null, level: 2 },
     nextRound: { levelOverride: null },
-    security: { votesPerIpV4: 3, votesPerIpV6: 1 },
+    security: { votesPerIpV4: 3, votesPerIpV6: 1, votesPerNetV6: 5 },
     ledger: {
       cratePriceCents: 1_890,
       budgetCents: 150_000,

@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Badge, Button, Card, Empty, Field, Input, Notice, Select, Spinner } from '../../components/ui.tsx';
 import { api } from '../../lib/api.ts';
 import { berlinParts, formatDateTime, formatEuro, formatTime, fromBerlin } from '../../lib/time.ts';
-import { PageTitle, useAdmin, useAdminData } from './shared.tsx';
+import { PageTitle, useAdmin, useAdminData, useInFlight } from './shared.tsx';
 
 export function BuzzerPage() {
   const { data } = useAdminData<{
@@ -66,6 +66,7 @@ export function BuzzerPage() {
 
 export function DisplaysPage() {
   const { run } = useAdmin();
+  const { busy, guard } = useInFlight();
   const { data, reload } = useAdminData<{
     displays: Array<{
       id: number;
@@ -93,13 +94,15 @@ export function DisplaysPage() {
         <Card title="Display koppeln">
           <form
             className="flex flex-col gap-3"
-            onSubmit={async (e) => {
+            onSubmit={(e) => {
               e.preventDefault();
-              const ok = await run(() => api.post('/api/admin/displays/claim', form), 'Display gekoppelt');
-              if (ok) {
-                setForm({ code: '', name: '', kind: form.kind });
-                await reload();
-              }
+              void guard('claim', async () => {
+                const ok = await run(() => api.post('/api/admin/displays/claim', form), 'Display gekoppelt');
+                if (ok) {
+                  setForm({ code: '', name: '', kind: form.kind });
+                  await reload();
+                }
+              });
             }}
           >
             <Field label="Code vom Bildschirm">
@@ -129,7 +132,7 @@ export function DisplaysPage() {
                 ))}
               </Select>
             </Field>
-            <Button type="submit" disabled={form.code.length !== 6}>
+            <Button type="submit" busy={busy === 'claim'} disabled={form.code.length !== 6}>
               Koppeln
             </Button>
           </form>
@@ -186,7 +189,7 @@ type SettingsData = {
     maxMoodStep: number;
     allowExplicit: boolean;
   };
-  security: { votesPerIpV4: number; votesPerIpV6: number };
+  security: { votesPerIpV4: number; votesPerIpV6: number; votesPerNetV6: number };
   ledger: {
     cratePriceCents: number;
     budgetCents: number;
@@ -221,21 +224,28 @@ function SettingsCard<K extends keyof SettingsData>({
   onSaved: () => Promise<void>;
   children: (value: SettingsData[K], set: (patch: Partial<SettingsData[K]>) => void) => ReactNode;
 }) {
-  const { run } = useAdmin();
+  const { run, notify } = useAdmin();
+  const { busy, guard } = useInFlight();
   const [value, setValue] = useState(data[section]);
   useEffect(() => setValue(data[section]), [data, section]);
   return (
     <Card title={title}>
       <form
         className="flex flex-col gap-3"
-        onSubmit={async (e) => {
+        onSubmit={(e) => {
           e.preventDefault();
-          await run(() => api.put(`/api/admin/settings/${section}`, value), `${title} gespeichert`);
-          await onSaved();
+          if (Object.values(value).some((v) => typeof v === 'number' && !Number.isFinite(v))) {
+            notify('Bitte nur gültige Zahlen eingeben.', 'danger');
+            return;
+          }
+          void guard('save', async () => {
+            await run(() => api.put(`/api/admin/settings/${section}`, value), `${title} gespeichert`);
+            await onSaved();
+          });
         }}
       >
-        {children(value, (patch) => setValue({ ...value, ...patch }))}
-        <Button type="submit" variant="outline" className="self-start">
+        {children(value, (patch) => setValue((current) => ({ ...current, ...patch })))}
+        <Button type="submit" variant="outline" className="self-start" busy={busy !== null}>
           Speichern
         </Button>
       </form>
@@ -244,6 +254,23 @@ function SettingsCard<K extends keyof SettingsData>({
 }
 
 const num = (v: string) => Number(v.replace(',', '.'));
+
+function EuroInput({ cents, onChange }: { cents: number; onChange: (cents: number) => void }) {
+  const [text, setText] = useState(() => (cents / 100).toFixed(2));
+  useEffect(() => {
+    setText((current) => (Object.is(Math.round(num(current) * 100), cents) ? current : (cents / 100).toFixed(2)));
+  }, [cents]);
+  return (
+    <Input
+      inputMode="decimal"
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value);
+        onChange(Math.round(num(e.target.value) * 100));
+      }}
+    />
+  );
+}
 
 export function SettingsPage() {
   const { data, reload } = useAdminData<SettingsData>('/api/admin/settings');
@@ -357,13 +384,25 @@ export function SettingsPage() {
                     onChange={(e) => set({ votesPerIpV4: num(e.target.value) })}
                   />
                 </Field>
-                <Field label="Stimmen pro IPv6-Netz (/64) und Runde">
+                <Field label="Stimmen pro IPv6-Anschluss (/64) und Runde">
                   <Input
                     type="number"
                     min={1}
                     max={50}
                     value={v.votesPerIpV6}
                     onChange={(e) => set({ votesPerIpV6: num(e.target.value) })}
+                  />
+                </Field>
+                <Field
+                  label="Stimmen pro IPv6-Großnetz (/48) und Runde"
+                  hint="Obergrenze für alle Anschlüsse eines Netzes – bremst Geräte, die ständig neue IPv6-Adressen ziehen."
+                >
+                  <Input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={v.votesPerNetV6}
+                    onChange={(e) => set({ votesPerNetV6: num(e.target.value) })}
                   />
                 </Field>
               </div>
@@ -374,19 +413,17 @@ export function SettingsPage() {
           {(v, set) => (
             <>
               <div className="grid grid-cols-2 gap-3">
-                <Field label="Durchschnittspreis pro Kasten (€)" hint={formatEuro(v.cratePriceCents)}>
-                  <Input
-                    inputMode="decimal"
-                    defaultValue={(v.cratePriceCents / 100).toFixed(2)}
-                    onBlur={(e) => set({ cratePriceCents: Math.round(num(e.target.value) * 100) })}
-                  />
+                <Field
+                  label="Durchschnittspreis pro Kasten (€)"
+                  hint={Number.isFinite(v.cratePriceCents) ? formatEuro(v.cratePriceCents) : 'ungültig'}
+                >
+                  <EuroInput cents={v.cratePriceCents} onChange={(cratePriceCents) => set({ cratePriceCents })} />
                 </Field>
-                <Field label="Budget (€)" hint={formatEuro(v.budgetCents)}>
-                  <Input
-                    inputMode="decimal"
-                    defaultValue={(v.budgetCents / 100).toFixed(2)}
-                    onBlur={(e) => set({ budgetCents: Math.round(num(e.target.value) * 100) })}
-                  />
+                <Field
+                  label="Budget (€)"
+                  hint={Number.isFinite(v.budgetCents) ? formatEuro(v.budgetCents) : 'ungültig'}
+                >
+                  <EuroInput cents={v.budgetCents} onChange={(budgetCents) => set({ budgetCents })} />
                 </Field>
               </div>
               <div className="grid grid-cols-3 gap-3">
@@ -442,23 +479,109 @@ export function SettingsPage() {
   );
 }
 
+type Role = 'owner' | 'admin';
+
+interface AdminUserRow {
+  id: number;
+  username: string;
+  display_name: string;
+  role: Role;
+  disabled: number;
+  last_login_at: number | null;
+  sessions: number;
+}
+
+interface InviteRow {
+  username: string;
+  display_name: string;
+  role: Role;
+  created_at: number;
+  expires_at: number;
+  used_at: number | null;
+  revoked: number;
+}
+
+const roleLabel: Record<Role, string> = { owner: 'Owner', admin: 'Admin' };
+
+const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+function inviteStatus(invite: InviteRow, now: number): string | null {
+  if (invite.used_at) return 'eingelöst';
+  if (invite.revoked) return 'widerrufen';
+  if (invite.expires_at <= now) return 'abgelaufen';
+  return null;
+}
+
 export function UsersPage() {
-  const { me, run } = useAdmin();
-  const { data, reload } = useAdminData<{
-    users: Array<{
-      id: number;
-      username: string;
-      display_name: string;
-      role: string;
-      disabled: number;
-      last_login_at: number | null;
-      sessions: number;
-    }>;
-    invites: Array<{ username: string; role: string; expires_at: number; used_at: number | null }>;
-  }>('/api/admin/users');
-  const [form, setForm] = useState({ username: '', displayName: '', role: 'admin' });
-  const [link, setLink] = useState<string | null>(null);
+  const { me, run, notify } = useAdmin();
+  const { busy, guard } = useInFlight();
+  const { data, reload } = useAdminData<{ users: AdminUserRow[]; invites: InviteRow[] }>('/api/admin/users');
+  const [form, setForm] = useState<{ username: string; displayName: string; role: Role }>({
+    username: '',
+    displayName: '',
+    role: 'admin',
+  });
+  const [link, setLink] = useState<{ username: string; url: string } | null>(null);
   const owner = me.role === 'owner';
+  const users = data?.users ?? [];
+  const existing = form.username.trim() ? users.find((u) => sameName(u.username, form.username)) : undefined;
+  const now = Date.now();
+
+  function changeUsername(username: string) {
+    setForm((f) => {
+      const before = users.find((u) => sameName(u.username, f.username));
+      const match = username.trim() ? users.find((u) => sameName(u.username, username)) : undefined;
+      if (match === before) return { ...f, username };
+      if (match) return { username, displayName: match.display_name, role: match.role };
+      return {
+        username,
+        displayName: before && f.displayName === before.display_name ? '' : f.displayName,
+        role: 'admin',
+      };
+    });
+  }
+
+  function invite() {
+    if (existing) {
+      const roleChange =
+        existing.role !== form.role
+          ? `\nRolle ändert sich: ${roleLabel[existing.role]} → ${roleLabel[form.role]}.`
+          : '';
+      const question = `Zugang „${existing.username}“ zurücksetzen?\nBeim Einlösen werden Passwort und 2FA ersetzt und alle Sitzungen beendet.${roleChange}`;
+      if (!confirm(question)) return;
+    }
+    const reset = Boolean(existing);
+    void guard('invite', async () => {
+      const result = await run(
+        () => api.post<{ invitePath: string }>('/api/admin/users/invite', { ...form, ...(reset ? { reset } : {}) }),
+        reset ? 'Reset-Link erstellt' : 'Einladung erstellt',
+      );
+      if (result) {
+        setLink({ username: form.username.trim(), url: `${window.location.origin}${result.invitePath}` });
+        await reload();
+      }
+    });
+  }
+
+  function revokeInvites(username: string) {
+    if (!confirm(`Offene Einladungen für „${username}“ widerrufen? Der Link funktioniert danach nicht mehr.`)) return;
+    void guard(`revoke-${username}`, async () => {
+      const result = await run(() => api.post<{ revoked: number }>('/api/admin/users/invites/revoke', { username }));
+      if (result) {
+        notify(result.revoked === 1 ? 'Einladung widerrufen' : `${result.revoked} Einladungen widerrufen`);
+        if (link && sameName(link.username, username)) setLink(null);
+      }
+      await reload();
+    });
+  }
+
+  function userAction(id: number, path: string, success: string) {
+    void guard(`${path}-${id}`, async () => {
+      await run(() => api.post(`/api/admin/users/${id}/${path}`), success);
+      await reload();
+    });
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <PageTitle
@@ -466,35 +589,35 @@ export function UsersPage() {
         subtitle="Jeder Admin hat einen eigenen Zugang mit Passwort und 2FA. Einladungen gelten 24 Stunden."
       />
       <div className="grid gap-6 lg:grid-cols-[24rem_1fr]">
-        <Card title="Admin einladen">
+        <Card title={existing ? 'Zugang zurücksetzen' : 'Admin einladen'}>
           {!owner ? (
             <Notice>Nur Owner können Admins einladen oder sperren.</Notice>
           ) : (
             <form
               className="flex flex-col gap-3"
-              onSubmit={async (e) => {
+              onSubmit={(e) => {
                 e.preventDefault();
-                const result = await run(
-                  () => api.post<{ invitePath: string }>('/api/admin/users/invite', form),
-                  'Einladung erstellt',
-                );
-                if (result) {
-                  setLink(`${window.location.origin}${result.invitePath}`);
-                  await reload();
-                }
+                invite();
               }}
             >
               <Field
                 label="Benutzername"
-                hint="Für Passwort-/2FA-Reset einfach denselben Benutzernamen erneut einladen."
+                hint="Für einen Passwort-/2FA-Reset denselben Benutzernamen eingeben und bestätigen."
               >
                 <Input
                   value={form.username}
-                  onChange={(e) => setForm({ ...form, username: e.target.value })}
+                  onChange={(e) => changeUsername(e.target.value)}
                   pattern="[a-zA-Z0-9._-]{3,40}"
                   required
                 />
               </Field>
+              {existing ? (
+                <Notice tone={existing.disabled ? 'danger' : 'warning'}>
+                  {existing.disabled
+                    ? `„${existing.username}“ ist gesperrt. Erst entsperren, dann den Zugang zurücksetzen.`
+                    : `„${existing.username}“ existiert bereits (${roleLabel[existing.role]}). Der Link setzt Passwort und 2FA dieses Zugangs zurück und beendet beim Einlösen alle Sitzungen.`}
+                </Notice>
+              ) : null}
               <Field label="Anzeigename">
                 <Input
                   value={form.displayName}
@@ -502,18 +625,32 @@ export function UsersPage() {
                   required
                 />
               </Field>
-              <Field label="Rolle">
-                <Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+              <Field
+                label="Rolle"
+                hint={
+                  existing && existing.role !== form.role
+                    ? `Ändert die Rolle von ${roleLabel[existing.role]} zu ${roleLabel[form.role]}.`
+                    : undefined
+                }
+              >
+                <Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>
                   <option value="admin">Admin</option>
                   <option value="owner">Owner (darf Admins verwalten)</option>
                 </Select>
               </Field>
-              <Button type="submit">Einladungslink erzeugen</Button>
+              <Button
+                type="submit"
+                variant={existing ? 'danger' : 'primary'}
+                busy={busy === 'invite'}
+                disabled={Boolean(existing?.disabled)}
+              >
+                {existing ? 'Zugang zurücksetzen' : 'Einladungslink erzeugen'}
+              </Button>
               {link ? (
                 <Notice tone="success">
-                  Link persönlich übergeben (nicht in Gruppenchats):
+                  Link für {link.username} persönlich übergeben (nicht in Gruppenchats):
                   <br />
-                  <span className="font-mono text-xs break-all">{link}</span>
+                  <span className="font-mono text-xs break-all">{link.url}</span>
                 </Notice>
               ) : null}
             </form>
@@ -525,7 +662,12 @@ export function UsersPage() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => void run(() => api.post('/api/admin/sessions/revoke-mine'), 'Andere Sitzungen beendet')}
+              busy={busy === 'revoke-mine'}
+              onClick={() =>
+                void guard('revoke-mine', () =>
+                  run(() => api.post('/api/admin/sessions/revoke-mine'), 'Andere Sitzungen beendet'),
+                )
+              }
             >
               Meine anderen Sitzungen beenden
             </Button>
@@ -545,7 +687,7 @@ export function UsersPage() {
                       {u.display_name} <span className="font-mono text-sm text-muted">{u.username}</span>
                     </div>
                     <div className="text-sm text-muted">
-                      {u.role} · {u.sessions} Sitzungen · Login{' '}
+                      {roleLabel[u.role]} · {u.sessions} Sitzungen · Login{' '}
                       {u.last_login_at ? formatDateTime(u.last_login_at) : 'nie'}
                     </div>
                   </div>
@@ -554,24 +696,16 @@ export function UsersPage() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() =>
-                          void run(
-                            () => api.post(`/api/admin/users/${u.id}/revoke-sessions`),
-                            'Sitzungen beendet',
-                          ).then(reload)
-                        }
+                        disabled={busy !== null}
+                        onClick={() => userAction(u.id, 'revoke-sessions', 'Sitzungen beendet')}
                       >
                         Abmelden
                       </Button>
                       <Button
                         size="sm"
                         variant={u.disabled ? 'outline' : 'danger'}
-                        onClick={() =>
-                          void run(
-                            () => api.post(`/api/admin/users/${u.id}/${u.disabled ? 'enable' : 'disable'}`),
-                            'Gespeichert',
-                          ).then(reload)
-                        }
+                        disabled={busy !== null}
+                        onClick={() => userAction(u.id, u.disabled ? 'enable' : 'disable', 'Gespeichert')}
                       >
                         {u.disabled ? 'Entsperren' : 'Sperren'}
                       </Button>
@@ -585,18 +719,26 @@ export function UsersPage() {
             <>
               <h3 className="mt-5 mb-2 text-sm font-semibold text-muted">Einladungen</h3>
               <ul className="flex flex-col gap-1 text-sm">
-                {data.invites.map((i) => (
-                  <li key={`${i.username}-${i.expires_at}`} className="flex justify-between">
-                    <span className="font-mono">{i.username}</span>
-                    <span className="text-muted">
-                      {i.used_at
-                        ? 'eingelöst'
-                        : i.expires_at < Date.now()
-                          ? 'abgelaufen'
-                          : `gültig bis ${formatTime(i.expires_at)}`}
-                    </span>
-                  </li>
-                ))}
+                {data.invites.map((i) => {
+                  const status = inviteStatus(i, now);
+                  return (
+                    <li key={`${i.username}-${i.created_at}`} className="flex items-center justify-between gap-2">
+                      <span className="font-mono">{i.username}</span>
+                      <span className="ml-auto text-muted">{status ?? `gültig bis ${formatTime(i.expires_at)}`}</span>
+                      {owner && !status ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          busy={busy === `revoke-${i.username}`}
+                          disabled={busy !== null}
+                          onClick={() => revokeInvites(i.username)}
+                        >
+                          Widerrufen
+                        </Button>
+                      ) : null}
+                    </li>
+                  );
+                })}
               </ul>
             </>
           ) : null}

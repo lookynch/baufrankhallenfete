@@ -17,6 +17,7 @@ import {
   dummyPasswordWork,
   hashPassword,
   iterationsFrom,
+  MAX_PBKDF2_ITERATIONS,
   passwordProblem,
   verifyPassword,
 } from '../../security/password.ts';
@@ -37,6 +38,7 @@ import { audit, auditStatement } from '../../services/audit.ts';
 
 export const INVITE_TTL_MS = 24 * 3_600_000;
 const LOGIN_TICKET_MS = 5 * 60_000;
+const TOTP_WINDOW_SECONDS = 900;
 const ISSUER = 'Baufrankhallen-Fete';
 
 export const authRoutes = new Hono<AppEnv>();
@@ -57,13 +59,14 @@ export const adminGuard: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (method !== 'GET' && method !== 'HEAD') {
     if (!sameOrigin(c) || c.req.header('X-Requested-With') !== 'fete') fail(403, 'csrf_check_failed');
   }
-  if (c.env.ACCESS_AUD && c.env.ACCESS_TEAM_DOMAIN) {
-    const valid = await verifyAccessJwt(
-      c.req.header('Cf-Access-Jwt-Assertion'),
-      c.env.ACCESS_TEAM_DOMAIN,
-      c.env.ACCESS_AUD,
-      c.var.rt.now(),
-    );
+  const audience = c.env.ACCESS_AUD;
+  const teamDomain = c.env.ACCESS_TEAM_DOMAIN;
+  if (audience || teamDomain) {
+    if (!audience || !teamDomain) {
+      console.error('Cloudflare Access misconfigured: ACCESS_AUD and ACCESS_TEAM_DOMAIN must both be set');
+      fail(503, 'server_not_configured');
+    }
+    const valid = await verifyAccessJwt(c.req.header('Cf-Access-Jwt-Assertion'), teamDomain, audience, c.var.rt.now());
     if (!valid) fail(403, 'access_required');
   }
   await next();
@@ -85,9 +88,28 @@ export function requireReauth(c: AppContext): void {
   if (!hasRecentReauth(c.var.admin, c.var.rt.now())) fail(403, 'reauth_required');
 }
 
-async function rateLimit(c: AppContext, key: string, max: number, windowSeconds: number): Promise<void> {
-  const result = await hitRateLimit(c.env.DB, key, max, windowSeconds, c.var.rt.now());
+async function rateLimit(
+  c: AppContext,
+  key: string,
+  max: number,
+  windowSeconds: number,
+  now = c.var.rt.now(),
+): Promise<void> {
+  const result = await hitRateLimit(c.env.DB, key, max, windowSeconds, now);
   if (!result.allowed) fail(429, 'rate_limited', { retryAfterSeconds: result.retryAfterSeconds });
+}
+
+function refundRateLimit(db: D1Database, key: string, windowSeconds: number, now: number): D1PreparedStatement {
+  const windowMs = windowSeconds * 1000;
+  return db
+    .prepare('UPDATE rate_limits SET count = count - 1 WHERE key = ?1 AND window_start = ?2 AND count > 0')
+    .bind(key, Math.floor(now / windowMs) * windowMs);
+}
+
+export function revokeInvites(db: D1Database, username: string, now: number): D1PreparedStatement {
+  return db
+    .prepare('UPDATE admin_invites SET expires_at = ?2 WHERE username = ?1 AND used_at IS NULL AND expires_at > ?2')
+    .bind(username, now);
 }
 
 export async function createInvite(
@@ -97,29 +119,62 @@ export async function createInvite(
   now: number,
 ): Promise<string> {
   const token = randomToken(32);
-  await db
-    .prepare(
-      `INSERT INTO admin_invites (token_hash, username, display_name, role, created_by, created_at, expires_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
-    )
-    .bind(await sha256Hex(token), input.username, input.displayName, input.role, createdBy, now, now + INVITE_TTL_MS)
-    .run();
+  await db.batch([
+    revokeInvites(db, input.username, now),
+    db
+      .prepare(
+        `INSERT INTO admin_invites (token_hash, username, display_name, role, created_by, created_at, expires_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+      )
+      .bind(await sha256Hex(token), input.username, input.displayName, input.role, createdBy, now, now + INVITE_TTL_MS),
+  ]);
   return token;
 }
 
-async function loadInvite(db: D1Database, token: string, now: number) {
+interface InviteTarget {
+  id: number;
+  role: 'owner' | 'admin';
+  disabled: number;
+  other_owners: number;
+}
+
+export async function inviteTarget(db: D1Database, username: string): Promise<InviteTarget | null> {
   return db
     .prepare(
-      'SELECT token_hash, username, display_name, role, expires_at FROM admin_invites WHERE token_hash = ?1 AND used_at IS NULL AND expires_at > ?2',
+      `SELECT u.id, u.role, u.disabled,
+              (SELECT COUNT(*) FROM admin_users o WHERE o.role = 'owner' AND o.disabled = 0 AND o.id <> u.id) AS other_owners
+       FROM admin_users u WHERE u.username = ?1`,
     )
-    .bind(await sha256Hex(token), now)
+    .bind(username)
+    .first<InviteTarget>();
+}
+
+export function assertInviteApplicable(target: InviteTarget | null, role: 'owner' | 'admin'): void {
+  if (!target) return;
+  if (target.disabled) fail(409, 'user_disabled');
+  if (target.role === 'owner' && role === 'admin' && target.other_owners === 0) fail(409, 'last_owner');
+}
+
+async function loadInvite(db: D1Database, token: string, now: number) {
+  const invite = await db
+    .prepare(
+      'SELECT token_hash, username, display_name, role, created_at, expires_at, used_at FROM admin_invites WHERE token_hash = ?1',
+    )
+    .bind(await sha256Hex(token))
     .first<{
       token_hash: string;
       username: string;
       display_name: string;
       role: 'owner' | 'admin';
+      created_at: number;
       expires_at: number;
+      used_at: number | null;
     }>();
+  if (!invite || invite.used_at !== null) fail(404, 'invite_invalid');
+  if (invite.expires_at <= now) {
+    fail(404, invite.expires_at < invite.created_at + INVITE_TTL_MS ? 'invite_revoked' : 'invite_invalid');
+  }
+  return invite;
 }
 
 async function recoveryHash(pepper: string, code: string): Promise<string> {
@@ -182,7 +237,6 @@ authRoutes.post('/invite/info', async (c) => {
   await rateLimit(c, `invite:${await clientIpHash(c)}`, 30, 600);
   const { token } = await body(c, z.object({ token: z.string().min(20).max(100) }));
   const invite = await loadInvite(c.env.DB, token, c.var.rt.now());
-  if (!invite) fail(404, 'invite_invalid');
   return c.json({
     username: invite.username,
     displayName: invite.display_name,
@@ -196,7 +250,6 @@ authRoutes.post('/invite/setup', async (c) => {
   const now = c.var.rt.now();
   const { token } = await body(c, z.object({ token: z.string().min(20).max(100) }));
   const invite = await loadInvite(c.env.DB, token, now);
-  if (!invite) fail(404, 'invite_invalid');
   const secret = generateTotpSecret();
   const setupToken = await signValue(c.env.COOKIE_SECRET, 'totp-setup', {
     s: await encrypt(c.env.ENC_KEY, secret),
@@ -219,7 +272,6 @@ authRoutes.post('/invite/complete', async (c) => {
     }),
   );
   const invite = await loadInvite(c.env.DB, input.token, now);
-  if (!invite) fail(404, 'invite_invalid');
   const problem = passwordProblem(input.password, invite.username);
   if (problem) fail(422, problem);
   const setup = await verifySignedValue<{ s: string; i: string; e: number }>(
@@ -231,6 +283,8 @@ authRoutes.post('/invite/complete', async (c) => {
   const secret = await decrypt(c.env.ENC_KEY, setup.s);
   const step = await verifyTotp(secret, input.code, now, 0);
   if (step === null) fail(422, 'invalid_code');
+  const db = c.env.DB;
+  assertInviteApplicable(await inviteTarget(db, invite.username), invite.role);
 
   const passwordHash = await hashPassword(
     input.password,
@@ -238,9 +292,8 @@ authRoutes.post('/invite/complete', async (c) => {
     iterationsFrom(c.env.PBKDF2_ITERATIONS),
   );
   const secretEnc = await encrypt(c.env.ENC_KEY, secret);
-  const db = c.env.DB;
   const claimed = await db
-    .prepare('UPDATE admin_invites SET used_at = ?2 WHERE token_hash = ?1 AND used_at IS NULL')
+    .prepare('UPDATE admin_invites SET used_at = ?2 WHERE token_hash = ?1 AND used_at IS NULL AND expires_at > ?2')
     .bind(invite.token_hash, now)
     .run();
   if (claimed.meta.changes !== 1) fail(409, 'invite_used');
@@ -250,12 +303,18 @@ authRoutes.post('/invite/complete', async (c) => {
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
        ON CONFLICT (username) DO UPDATE SET display_name = excluded.display_name, role = excluded.role,
          password_hash = excluded.password_hash, totp_secret_enc = excluded.totp_secret_enc,
-         totp_last_step = excluded.totp_last_step, disabled = 0
+         totp_last_step = excluded.totp_last_step
+       WHERE admin_users.disabled = 0
+         AND (excluded.role = 'owner' OR admin_users.role = 'admin'
+           OR EXISTS (SELECT 1 FROM admin_users o WHERE o.role = 'owner' AND o.disabled = 0 AND o.id <> admin_users.id))
        RETURNING id`,
     )
     .bind(invite.username, invite.display_name, invite.role, passwordHash, secretEnc, step, now)
     .first<{ id: number }>();
-  if (!user) fail(500, 'user_not_created');
+  if (!user) {
+    assertInviteApplicable(await inviteTarget(db, invite.username), invite.role);
+    fail(500, 'user_not_created');
+  }
   const codes = Array.from({ length: 10 }, newRecoveryCode);
   const hashes = await Promise.all(codes.map((code) => recoveryHash(c.env.SESSION_PEPPER, code)));
   await db.batch([
@@ -305,7 +364,7 @@ authRoutes.post('/login', async (c) => {
     });
     fail(401, 'invalid_credentials');
   }
-  if (verified.iterations !== iterations) {
+  if (verified.iterations !== iterations && verified.iterations + iterations <= MAX_PBKDF2_ITERATIONS) {
     const rehashed = await hashPassword(input.password, c.env.SESSION_PEPPER, iterations);
     await c.env.DB.prepare('UPDATE admin_users SET password_hash = ?2 WHERE id = ?1').bind(user.id, rehashed).run();
   }
@@ -361,13 +420,16 @@ authRoutes.post('/verify', async (c) => {
   );
   const ticket = await verifySignedValue<{ u: number; e: number }>(c.env.COOKIE_SECRET, 'login-ticket', input.ticket);
   if (!ticket || ticket.e < now) fail(401, 'login_expired');
-  await rateLimit(c, `totp:${ticket.u}`, 6, 900);
-  const user = await c.env.DB.prepare('SELECT * FROM admin_users WHERE id = ?1 AND disabled = 0')
+  const limitKey = `totp:${ticket.u}`;
+  await rateLimit(c, limitKey, 6, TOTP_WINDOW_SECONDS, now);
+  const db = c.env.DB;
+  const user = await db
+    .prepare('SELECT * FROM admin_users WHERE id = ?1 AND disabled = 0')
     .bind(ticket.u)
     .first<UserRow>();
   if (!user) fail(401, 'login_expired');
   if (!(await verifySecondFactor(c, user, input.code, input.recoveryCode))) {
-    await audit(c.env.DB, now, {
+    await audit(db, now, {
       userId: user.id,
       action: 'second_factor_failed',
       entity: 'admin_user',
@@ -375,9 +437,10 @@ authRoutes.post('/verify', async (c) => {
     });
     fail(401, 'invalid_code');
   }
-  await c.env.DB.batch([
-    c.env.DB.prepare('UPDATE admin_users SET last_login_at = ?2 WHERE id = ?1').bind(user.id, now),
-    auditStatement(c.env.DB, now, {
+  await db.batch([
+    db.prepare('UPDATE admin_users SET last_login_at = ?2 WHERE id = ?1').bind(user.id, now),
+    refundRateLimit(db, limitKey, TOTP_WINDOW_SECONDS, now),
+    auditStatement(db, now, {
       userId: user.id,
       action: input.recoveryCode ? 'login_recovery_code' : 'login',
       entity: 'admin_user',
@@ -390,7 +453,9 @@ authRoutes.post('/verify', async (c) => {
 });
 
 authRoutes.post('/logout', requireAdmin, async (c) => {
-  await destroySession(c.env.DB, c.var.admin.sessionHash);
+  const { userId, sessionHash } = c.var.admin;
+  await audit(c.env.DB, c.var.rt.now(), { userId, action: 'logout', entity: 'admin_user', entityId: userId });
+  await destroySession(c.env.DB, sessionHash);
   deleteCookie(c, ADMIN_COOKIE, { path: '/', secure: true });
   return c.json({ ok: true });
 });
@@ -414,12 +479,25 @@ authRoutes.get('/me', requireAdmin, async (c) => {
 
 authRoutes.post('/reauth', requireAdmin, async (c) => {
   const now = c.var.rt.now();
-  await rateLimit(c, `totp:${c.var.admin.userId}`, 6, 900);
+  const { userId, sessionHash } = c.var.admin;
+  const sessionKey = `totp-reauth:${userId}:${sessionHash.slice(0, 16)}`;
+  const accountKey = `totp-reauth:${userId}`;
+  await rateLimit(c, sessionKey, 6, TOTP_WINDOW_SECONDS, now);
+  await rateLimit(c, accountKey, 20, TOTP_WINDOW_SECONDS, now);
   const { code } = await body(c, z.object({ code: z.string().regex(/^\d{6}$/) }));
-  const user = await c.env.DB.prepare('SELECT * FROM admin_users WHERE id = ?1')
-    .bind(c.var.admin.userId)
-    .first<UserRow>();
-  if (!user || !(await verifySecondFactor(c, user, code, undefined))) fail(401, 'invalid_code');
-  await markReauth(c.env.DB, c.var.admin.sessionHash, now);
+  const db = c.env.DB;
+  const user = await db.prepare('SELECT * FROM admin_users WHERE id = ?1').bind(userId).first<UserRow>();
+  if (!user) fail(401, 'invalid_code');
+  const ipHash = await clientIpHash(c);
+  if (!(await verifySecondFactor(c, user, code, undefined))) {
+    await audit(db, now, { userId, action: 'reauth_failed', entity: 'admin_user', entityId: userId, ipHash });
+    fail(401, 'invalid_code');
+  }
+  await db.batch([
+    markReauth(db, sessionHash, now),
+    refundRateLimit(db, sessionKey, TOTP_WINDOW_SECONDS, now),
+    refundRateLimit(db, accountKey, TOTP_WINDOW_SECONDS, now),
+    auditStatement(db, now, { userId, action: 'reauth', entity: 'admin_user', entityId: userId, ipHash }),
+  ]);
   return c.json({ ok: true });
 });

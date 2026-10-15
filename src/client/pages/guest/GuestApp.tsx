@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { Spinner, useToast } from '../../components/ui.tsx';
+import { Button, Notice, Spinner, useToast } from '../../components/ui.tsx';
 import { api, ApiError } from '../../lib/api.ts';
 import { passiveFingerprint } from '../../lib/fingerprint.ts';
 import { useI18n, type MessageKey } from '../../lib/i18n.tsx';
@@ -10,52 +10,90 @@ import { turnstileToken } from '../../lib/turnstile.ts';
 import { VoteTab, type GuestState } from './VoteTab.tsx';
 import { WishTab } from './WishTab.tsx';
 
+const GUEST_ERRORS = ['ip_limit', 'round_closed', 'rate_limited', 'vote_invalidated'];
+const JOIN_NETWORK_RETRIES = 3;
+
 export function guestErrorKey(error: unknown): MessageKey {
   if (error instanceof ApiError) {
     if (error.status === 0) return 'guest.error.network';
-    const key = `guest.error.${error.code}`;
-    if (['guest.error.ip_limit', 'guest.error.round_closed', 'guest.error.rate_limited'].includes(key))
-      return key as MessageKey;
+    if (GUEST_ERRORS.includes(error.code)) return `guest.error.${error.code}` as MessageKey;
   }
   return 'guest.error.generic';
+}
+
+async function verifyDevice(siteKey: string | null): Promise<string | undefined> {
+  return turnstileToken(siteKey).catch(() => undefined);
 }
 
 export function JoinPage() {
   const { token } = useParams();
   const navigate = useNavigate();
   const { t } = useI18n();
-  const [failed, setFailed] = useState(false);
-  const started = useRef(false);
+  const [errorKey, setErrorKey] = useState<MessageKey | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const networkFailures = useRef(0);
+  const running = useRef(false);
 
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    window.history.replaceState(null, '', '/');
+    if (running.current) return;
+    running.current = true;
+    let retry: number | undefined;
+    const scheduleRetry = (ms: number) => {
+      retry = window.setTimeout(() => setAttempt((a) => a + 1), ms);
+    };
     void (async () => {
       try {
         const config = await api.get<{ turnstileSiteKey: string | null }>('/api/public/config');
-        const turnstile = await turnstileToken(config.turnstileSiteKey);
+        const turnstile = await verifyDevice(config.turnstileSiteKey);
         await api.post('/api/public/join', { token, turnstile, fingerprint: passiveFingerprint() });
         navigate('/', { replace: true });
-      } catch {
-        setFailed(true);
+      } catch (e) {
+        if (e instanceof ApiError && e.code === 'qr_expired') {
+          window.history.replaceState(null, '', '/');
+          setErrorKey('guest.qrExpired');
+          return;
+        }
+        if (e instanceof ApiError && e.code === 'rate_limited') {
+          setErrorKey(guestErrorKey(e));
+          const seconds = Number(e.details.retryAfterSeconds) || 30;
+          scheduleRetry(Math.min(seconds, 120) * 1000 + Math.random() * 5_000);
+        } else if (e instanceof ApiError && (e.status === 0 || e.status >= 500)) {
+          if (networkFailures.current < JOIN_NETWORK_RETRIES) {
+            setErrorKey(guestErrorKey(e));
+            networkFailures.current++;
+            scheduleRetry(2_000 * 2 ** networkFailures.current);
+          } else {
+            setErrorKey('guest.error.generic');
+          }
+        } else {
+          setErrorKey(guestErrorKey(e));
+        }
+      } finally {
+        running.current = false;
       }
     })();
-  }, [token, navigate]);
+    return () => window.clearTimeout(retry);
+  }, [token, navigate, attempt]);
 
+  const retryNow = () => {
+    networkFailures.current = 0;
+    setErrorKey(null);
+    setAttempt((a) => a + 1);
+  };
+
+  if (!errorKey) {
+    return (
+      <CenteredMessage>
+        <Spinner />
+        <p className="text-muted">{t('guest.joining')}</p>
+      </CenteredMessage>
+    );
+  }
   return (
     <CenteredMessage>
-      {failed ? (
-        <>
-          <ScanIcon />
-          <p className="text-lg">{t('guest.qrExpired')}</p>
-        </>
-      ) : (
-        <>
-          <Spinner />
-          <p className="text-muted">{t('guest.joining')}</p>
-        </>
-      )}
+      <ScanIcon />
+      <p className="text-lg">{t(errorKey)}</p>
+      {errorKey === 'guest.qrExpired' ? null : <Button onClick={retryNow}>{t('guest.retry')}</Button>}
     </CenteredMessage>
   );
 }
@@ -100,7 +138,27 @@ export function GuestApp() {
   const [tab, setTab] = useState<'vote' | 'wish'>('vote');
   const toast = useToast();
   const load = useCallback(() => api.get<GuestState>('/api/public/state'), []);
-  const { data, error, offline, offsetMs, refresh } = usePolling(load);
+  const { data, error, offline, offsetMs, refresh } = usePolling(load, { pauseHidden: true });
+  const [verifying, setVerifying] = useState(false);
+  const [verifyAttempted, setVerifyAttempted] = useState(false);
+  const autoVerified = useRef(false);
+  const siteKey = data?.joined && data.verified === false ? (data.turnstileSiteKey ?? null) : null;
+
+  const verify = useCallback(async () => {
+    if (!siteKey) return;
+    setVerifying(true);
+    const turnstile = await verifyDevice(siteKey);
+    if (turnstile) await api.post('/api/public/join', { turnstile }).catch(() => undefined);
+    await refresh();
+    setVerifying(false);
+    setVerifyAttempted(true);
+  }, [siteKey, refresh]);
+
+  useEffect(() => {
+    if (!siteKey || autoVerified.current) return;
+    autoVerified.current = true;
+    void verify();
+  }, [siteKey, verify]);
 
   if (!data && !error) {
     return (
@@ -133,6 +191,14 @@ export function GuestApp() {
         <div className="bg-warning/15 px-4 py-2 text-center text-sm text-warning">{t('guest.error.network')}</div>
       ) : null}
       <main className="mx-auto max-w-lg px-4 pt-2">
+        {siteKey && verifyAttempted && !verifying ? (
+          <div className="mb-4 flex flex-col gap-2">
+            <Notice tone="warning">{t('guest.unverified')}</Notice>
+            <Button size="sm" variant="outline" onClick={() => void verify()}>
+              {t('guest.retry')}
+            </Button>
+          </div>
+        ) : null}
         {data && tab === 'vote' ? (
           <VoteTab state={data} offsetMs={offsetMs} refresh={refresh} toast={toast.show} />
         ) : null}

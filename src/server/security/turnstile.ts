@@ -1,3 +1,7 @@
+export function turnstileConfigured(env: { TURNSTILE_SITE_KEY?: string; TURNSTILE_SECRET?: string }): boolean {
+  return Boolean(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET);
+}
+
 export async function verifyTurnstile(
   secret: string | undefined,
   token: string | undefined,

@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Badge, Button, Card, Field, Input, Select, Spinner, Stat } from '../../components/ui.tsx';
 import { api } from '../../lib/api.ts';
-import { formatDateTime, formatEuro } from '../../lib/time.ts';
-import { PageTitle, useAdmin, useAdminData } from './shared.tsx';
+import { berlinParts, formatDateTime, formatEuro, fromBerlin } from '../../lib/time.ts';
+import { PageTitle, useAdmin, useAdminData, useInFlight } from './shared.tsx';
 
 interface LedgerData {
   journal: Array<{
@@ -41,6 +41,7 @@ const kindLabel: Record<string, string> = {
 
 export function LedgerPage() {
   const { run } = useAdmin();
+  const { busy, guard } = useInFlight();
   const { data, reload } = useAdminData<LedgerData>('/api/admin/ledger', 15_000);
   const [form, setForm] = useState({
     kind: 'consumption',
@@ -49,6 +50,9 @@ export function LedgerPage() {
     amount: '',
     quantity: '1',
     text: 'Kasten Getränke (nachgetragen)',
+    backdate: false,
+    effectiveDate: '',
+    effectiveTime: '',
   });
   const [account, setAccount] = useState({ code: '', name: '', type: 'expense' });
   if (!data) return <Spinner />;
@@ -65,28 +69,44 @@ export function LedgerPage() {
         : 0;
   const totalDebit = data.balances.reduce((s, a) => s + a.debit_cents, 0);
   const totalCredit = data.balances.reduce((s, a) => s + a.credit_cents, 0);
+  const effectiveAt =
+    form.backdate && form.effectiveDate && form.effectiveTime
+      ? fromBerlin(form.effectiveDate, form.effectiveTime)
+      : null;
+  const effectiveInvalid = form.backdate && (effectiveAt === null || effectiveAt > Date.now());
 
-  async function book() {
-    await run(
-      () =>
-        api.post('/api/admin/ledger/entries', {
-          kind: form.kind,
-          debitAccount: debit,
-          creditAccount: credit,
-          amountCents,
-          quantity: form.kind === 'consumption' ? Number(form.quantity) : 0,
-          text: form.text,
-        }),
-      'Gebucht',
-    );
-    await reload();
+  function toggleBackdate(backdate: boolean) {
+    const now = berlinParts(Date.now());
+    setForm({ ...form, backdate, effectiveDate: now.date, effectiveTime: now.time });
   }
 
-  async function reverse(id: number, bookingNo: string) {
-    const reason = prompt(`Storno-Grund für ${bookingNo}:`);
-    if (!reason) return;
-    await run(() => api.post(`/api/admin/ledger/entries/${id}/reverse`, { reason }), 'Storniert');
-    await reload();
+  function book() {
+    return guard('book', async () => {
+      const booked = await run(
+        () =>
+          api.post('/api/admin/ledger/entries', {
+            kind: form.kind,
+            debitAccount: debit,
+            creditAccount: credit,
+            amountCents,
+            quantity: form.kind === 'consumption' ? Number(form.quantity) : 0,
+            text: form.text,
+            ...(effectiveAt !== null ? { effectiveAt } : {}),
+          }),
+        'Gebucht',
+      );
+      if (booked) setForm((f) => ({ ...f, amount: '', quantity: '1', backdate: false }));
+      await reload();
+    });
+  }
+
+  function reverse(id: number, bookingNo: string) {
+    return guard(`reverse-${id}`, async () => {
+      const reason = prompt(`Storno-Grund für ${bookingNo}:`);
+      if (!reason) return;
+      await run(() => api.post(`/api/admin/ledger/entries/${id}/reverse`, { reason }), 'Storniert');
+      await reload();
+    });
   }
 
   return (
@@ -151,7 +171,13 @@ export function LedgerPage() {
                     </td>
                     <td>
                       {e.kind !== 'reversal' && !e.reversed_by ? (
-                        <Button size="sm" variant="ghost" onClick={() => void reverse(e.id, e.booking_no)}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          busy={busy === `reverse-${e.id}`}
+                          disabled={busy !== null}
+                          onClick={() => void reverse(e.id, e.booking_no)}
+                        >
                           Storno
                         </Button>
                       ) : null}
@@ -226,6 +252,31 @@ export function LedgerPage() {
                   placeholder="0,00"
                 />
               </Field>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={form.backdate} onChange={(e) => toggleBackdate(e.target.checked)} />{' '}
+                Zeitpunkt nachtragen (sonst jetzt)
+              </label>
+              {form.backdate ? (
+                <Field
+                  label="Wirksam am (deutsche Zeit)"
+                  hint={effectiveInvalid ? 'Der Zeitpunkt darf nicht in der Zukunft liegen.' : undefined}
+                >
+                  <div className="grid grid-cols-[1fr_7rem] gap-2">
+                    <Input
+                      type="date"
+                      value={form.effectiveDate}
+                      onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })}
+                      required
+                    />
+                    <Input
+                      type="time"
+                      value={form.effectiveTime}
+                      onChange={(e) => setForm({ ...form, effectiveTime: e.target.value })}
+                      required
+                    />
+                  </div>
+                </Field>
+              ) : null}
               <Field label="Buchungstext">
                 <Input
                   value={form.text}
@@ -234,7 +285,11 @@ export function LedgerPage() {
                   required
                 />
               </Field>
-              <Button type="submit" disabled={amountCents <= 0 || debit === credit}>
+              <Button
+                type="submit"
+                busy={busy === 'book'}
+                disabled={!(amountCents > 0) || debit === credit || effectiveInvalid}
+              >
                 {formatEuro(amountCents)} buchen
               </Button>
             </form>

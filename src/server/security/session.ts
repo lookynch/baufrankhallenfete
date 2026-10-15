@@ -78,8 +78,8 @@ export async function destroySession(db: D1Database, sessionHash: string): Promi
   await db.prepare('DELETE FROM admin_sessions WHERE token_hash = ?1').bind(sessionHash).run();
 }
 
-export async function markReauth(db: D1Database, sessionHash: string, now: number): Promise<void> {
-  await db.prepare('UPDATE admin_sessions SET reauth_at = ?2 WHERE token_hash = ?1').bind(sessionHash, now).run();
+export function markReauth(db: D1Database, sessionHash: string, now: number): D1PreparedStatement {
+  return db.prepare('UPDATE admin_sessions SET reauth_at = ?2 WHERE token_hash = ?1').bind(sessionHash, now);
 }
 
 export function hasRecentReauth(principal: AdminPrincipal, now: number): boolean {

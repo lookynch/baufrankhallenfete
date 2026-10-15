@@ -327,12 +327,13 @@ describe('Displays und Gäste', () => {
     expect((await guest.request('POST', '/api/public/join', { json: { token: 'AAAAAAAA' } })).status).toBe(403);
     const token = await presenceToken('test-qr-secret-0123456789', h.clock.time);
     const joined = await guest.request('POST', '/api/public/join', { json: { token, fingerprint: 'ua|de|390x844' } });
-    expect(joined.json).toMatchObject({ joined: true, verified: false });
+    expect(joined.json).toMatchObject({ joined: true, verified: true });
     expect(guest.cookies.has('__Host-fete')).toBe(true);
 
     h.clock.advance(5_000);
     await guest.request('GET', '/api/public/state');
     const state = await guest.request('GET', '/api/public/state');
+    expect(state.json).toMatchObject({ verified: true, turnstileSiteKey: null });
     const round = state.json.round as { id: number; candidates: Array<{ songId: number; votes?: number }> };
     expect(round.candidates.length).toBeGreaterThanOrEqual(4);
     expect(round.candidates[0]).not.toHaveProperty('votes');

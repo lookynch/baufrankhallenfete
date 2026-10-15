@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { QrCode } from '../../components/music.tsx';
 import { Button, Card, Field, Input, Notice, Spinner } from '../../components/ui.tsx';
-import { api } from '../../lib/api.ts';
+import { api, ApiError } from '../../lib/api.ts';
 import { theme } from '../../lib/theme.ts';
 import { turnstileToken } from '../../lib/turnstile.ts';
 import { errorMessage } from './shared.tsx';
@@ -119,9 +119,29 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
   );
 }
 
+const INVITE_TOKEN_KEY = 'admin-invite-token';
+
+function readInviteToken(): string {
+  const fromHash = window.location.hash.slice(1);
+  try {
+    if (fromHash) sessionStorage.setItem(INVITE_TOKEN_KEY, fromHash);
+    return fromHash || (sessionStorage.getItem(INVITE_TOKEN_KEY) ?? '');
+  } catch {
+    return fromHash;
+  }
+}
+
+function forgetInviteToken() {
+  try {
+    sessionStorage.removeItem(INVITE_TOKEN_KEY);
+  } catch {
+    return;
+  }
+}
+
 export function InvitePage() {
   const navigate = useNavigate();
-  const [token] = useState(() => window.location.hash.slice(1));
+  const [token] = useState(readInviteToken);
   const [info, setInfo] = useState<{ username: string; displayName: string; role: string } | null>(null);
   const [setup, setSetup] = useState<{ secret: string; otpauth: string; setupToken: string } | null>(null);
   const [password, setPassword] = useState('');
@@ -131,17 +151,36 @@ export function InvitePage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const startSetup = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    setCode('');
+    try {
+      setSetup(await api.post('/api/admin/auth/invite/setup', { token }));
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [token]);
+
   useEffect(() => {
     window.history.replaceState(null, '', '/admin/invite');
+    if (!token) {
+      setError('Einladungslink unvollständig – bitte den Link erneut öffnen.');
+      return;
+    }
     void (async () => {
       try {
         setInfo(await api.post('/api/admin/auth/invite/info', { token }));
-        setSetup(await api.post('/api/admin/auth/invite/setup', { token }));
       } catch (e) {
         setError(errorMessage(e));
+        if (e instanceof ApiError && e.status === 404) forgetInviteToken();
+        return;
       }
+      await startSetup();
     })();
-  }, [token]);
+  }, [token, startSetup]);
 
   async function complete() {
     if (password !== repeat) return setError('Die Passwörter stimmen nicht überein.');
@@ -154,9 +193,11 @@ export function InvitePage() {
         setupToken: setup?.setupToken,
         code,
       });
+      forgetInviteToken();
       setRecoveryCodes(result.recoveryCodes);
     } catch (e) {
       setError(errorMessage(e));
+      if (e instanceof ApiError && e.code === 'setup_expired') setSetup(null);
     } finally {
       setBusy(false);
     }
@@ -185,8 +226,13 @@ export function InvitePage() {
 
   return (
     <AuthShell title="Admin-Zugang einrichten">
-      {!info && !error ? <Spinner /> : null}
-      {error && !info ? <Notice tone="danger">{error}</Notice> : null}
+      {!(info && setup) && !error ? <Spinner /> : null}
+      {error && !(info && setup) ? <Notice tone="danger">{error}</Notice> : null}
+      {info && !setup && error ? (
+        <Button className="mt-4 w-full" busy={busy} onClick={() => void startSetup()}>
+          2FA-Einrichtung neu starten
+        </Button>
+      ) : null}
       {info && setup ? (
         <form
           className="flex flex-col gap-5"

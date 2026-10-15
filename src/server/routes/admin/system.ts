@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { settingsSchemas, type SettingsKey } from '../../../shared/settings.ts';
-import { body, fail, idParam, query, type AppEnv } from '../../http.ts';
+import { body, clientIpHash, fail, idParam, query, type AppEnv } from '../../http.ts';
 import { clearRateLimit, peekRateLimit } from '../../security/ratelimit.ts';
 import { audit, auditStatement } from '../../services/audit.ts';
 import { readBudget } from '../../services/budget.ts';
@@ -23,7 +23,15 @@ import { loadSettings, saveSettings, SettingsError } from '../../services/settin
 import { authStatus } from '../../services/spotify-auth.ts';
 import { readSnapshot } from '../../services/tick.ts';
 import { nowPlayingView, upNextView } from '../../views.ts';
-import { createInvite, requireOwner, requireReauth } from './auth.ts';
+import {
+  assertInviteApplicable,
+  createInvite,
+  INVITE_TTL_MS,
+  inviteTarget,
+  requireOwner,
+  requireReauth,
+  revokeInvites,
+} from './auth.ts';
 
 export const systemRoutes = new Hono<AppEnv>();
 
@@ -74,6 +82,8 @@ systemRoutes.get('/dashboard', async (c) => {
     coverage: await setCoverage(db),
     stats: consumptionStats(rows, settings, now),
     settings: { voting: settings.voting, event: settings.event },
+    turnstileConfigured: Boolean(c.env.TURNSTILE_SITE_KEY && c.env.TURNSTILE_SECRET),
+    accessConfigured: Boolean(c.env.ACCESS_AUD && c.env.ACCESS_TEAM_DOMAIN),
   });
 });
 
@@ -195,6 +205,7 @@ systemRoutes.put('/ledger/accounts/:code', async (c) => {
 });
 
 function csvCell(value: unknown): string {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   const text = value === null || value === undefined ? '' : String(value);
   const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
   return /[";\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
@@ -325,15 +336,28 @@ systemRoutes.get('/users', async (c) => {
      FROM admin_users u ORDER BY u.username`,
   ).all();
   const invites = await c.env.DB.prepare(
-    'SELECT username, display_name, role, created_at, expires_at, used_at FROM admin_invites ORDER BY created_at DESC LIMIT 30',
-  ).all();
+    `SELECT username, display_name, role, created_at, expires_at, used_at,
+            used_at IS NULL AND expires_at < created_at + ?1 AS revoked
+     FROM admin_invites ORDER BY created_at DESC LIMIT 30`,
+  )
+    .bind(INVITE_TTL_MS)
+    .all();
   return c.json({ users: results, invites: invites.results });
 });
 
 systemRoutes.post('/sessions/revoke-mine', async (c) => {
-  await c.env.DB.prepare('DELETE FROM admin_sessions WHERE user_id = ?1 AND token_hash <> ?2')
-    .bind(c.var.admin.userId, c.var.admin.sessionHash)
-    .run();
+  const db = c.env.DB;
+  const { userId, sessionHash } = c.var.admin;
+  await db.batch([
+    db.prepare('DELETE FROM admin_sessions WHERE user_id = ?1 AND token_hash <> ?2').bind(userId, sessionHash),
+    auditStatement(db, c.var.rt.now(), {
+      userId,
+      action: 'sessions_revoke_mine',
+      entity: 'admin_user',
+      entityId: userId,
+      ipHash: await clientIpHash(c),
+    }),
+  ]);
   return c.json({ ok: true });
 });
 
@@ -354,8 +378,12 @@ ownerRoutes.post('/users/invite', async (c) => {
         .regex(/^[a-zA-Z0-9._-]+$/),
       displayName: z.string().trim().min(1).max(60),
       role: z.enum(['owner', 'admin']),
+      reset: z.boolean().optional(),
     }),
   );
+  const target = await inviteTarget(c.env.DB, input.username);
+  if (target && input.reset !== true) fail(409, 'username_exists');
+  assertInviteApplicable(target, input.role);
   const token = await createInvite(c.env.DB, input, c.var.admin.userId, now);
   await audit(c.env.DB, now, {
     userId: c.var.admin.userId,
@@ -365,6 +393,23 @@ ownerRoutes.post('/users/invite', async (c) => {
     after: input,
   });
   return c.json({ invitePath: `/admin/invite#${token}` });
+});
+
+ownerRoutes.post('/users/invites/revoke', async (c) => {
+  requireReauth(c);
+  const now = c.var.rt.now();
+  const { username } = await body(c, z.object({ username: z.string().trim().min(1).max(40) }));
+  const db = c.env.DB;
+  const [result] = await db.batch([
+    revokeInvites(db, username, now),
+    auditStatement(db, now, {
+      userId: c.var.admin.userId,
+      action: 'invites_revoke',
+      entity: 'admin_user',
+      entityId: username,
+    }),
+  ]);
+  return c.json({ revoked: result?.meta.changes ?? 0 });
 });
 
 ownerRoutes.post('/users/:id/:action{disable|enable}', async (c) => {
@@ -384,7 +429,17 @@ ownerRoutes.post('/users/:id/:action{disable|enable}', async (c) => {
   const db = c.env.DB;
   await db.batch([
     db.prepare('UPDATE admin_users SET disabled = ?2 WHERE id = ?1').bind(id, disable ? 1 : 0),
-    ...(disable ? [db.prepare('DELETE FROM admin_sessions WHERE user_id = ?1').bind(id)] : []),
+    ...(disable
+      ? [
+          db.prepare('DELETE FROM admin_sessions WHERE user_id = ?1').bind(id),
+          db
+            .prepare(
+              `UPDATE admin_invites SET expires_at = ?2
+               WHERE used_at IS NULL AND expires_at > ?2 AND username = (SELECT username FROM admin_users WHERE id = ?1)`,
+            )
+            .bind(id, now),
+        ]
+      : []),
     auditStatement(db, now, {
       userId: c.var.admin.userId,
       action: disable ? 'user_disable' : 'user_enable',

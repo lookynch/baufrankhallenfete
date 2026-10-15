@@ -23,6 +23,19 @@ export function validateSettings(settings: Settings): void {
   if (settings.voting.endsAt !== null && settings.voting.endsAt <= settings.voting.startsAt) {
     throw new SettingsError('voting_end_before_start');
   }
+  const { inventoryAccount, expenseAccount, payableAccount } = settings.ledger;
+  if (new Set([inventoryAccount, expenseAccount, payableAccount]).size !== 3) {
+    throw new SettingsError('ledger_accounts_must_differ');
+  }
+}
+
+async function assertLedgerAccountsExist(db: D1Database, ledger: Settings['ledger']): Promise<void> {
+  const codes = [ledger.inventoryAccount, ledger.expenseAccount, ledger.payableAccount];
+  const row = await db
+    .prepare('SELECT COUNT(*) AS n FROM ledger_accounts WHERE code IN (?1, ?2, ?3)')
+    .bind(...codes)
+    .first<{ n: number }>();
+  if ((row?.n ?? 0) !== codes.length) throw new SettingsError('unknown_ledger_account');
 }
 
 export async function saveSettings<K extends SettingsKey>(
@@ -38,7 +51,9 @@ export async function saveSettings<K extends SettingsKey>(
   if (!parsed.success)
     throw new SettingsError(parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
   const after = parsed.data as Settings[K];
-  validateSettings({ ...current, [key]: after });
+  const next = { ...current, [key]: after };
+  validateSettings(next);
+  if (key === 'ledger') await assertLedgerAccountsExist(db, next.ledger);
   await db
     .prepare(
       `INSERT INTO settings (key, value, updated_at, updated_by) VALUES (?1, ?2, ?3, ?4)

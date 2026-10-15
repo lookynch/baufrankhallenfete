@@ -5,6 +5,7 @@ export const displayKinds = ['tv', 'bar_stats', 'bar_ledger', 'player'] as const
 export type DisplayKind = (typeof displayKinds)[number];
 
 const PAIRING_TTL_MS = 10 * 60_000;
+const DELIVERY_GRACE_MS = 2 * 60_000;
 
 export class DisplayError extends Error {}
 
@@ -55,8 +56,11 @@ export async function claimPairing(
     .first<{ id: number }>();
   if (!display) throw new DisplayError('display_not_created');
   await db
-    .prepare('UPDATE display_pairings SET display_id = ?2, token_enc = ?3 WHERE code = ?1 AND display_id IS NULL')
-    .bind(input.code, display.id, await encrypt(encKey, token))
+    .prepare(
+      `UPDATE display_pairings SET display_id = ?2, token_enc = ?3, expires_at = MAX(expires_at, ?4)
+       WHERE code = ?1 AND display_id IS NULL`,
+    )
+    .bind(input.code, display.id, await encrypt(encKey, token), now + DELIVERY_GRACE_MS)
     .run();
   return display.id;
 }
@@ -67,7 +71,7 @@ export async function pollPairing(
   code: string,
   secret: string,
   now: number,
-): Promise<{ status: 'pending' | 'expired' } | { status: 'paired'; token: string; kind: DisplayKind }> {
+): Promise<{ status: 'pending' | 'expired' | 'invalid' } | { status: 'paired'; token: string; kind: DisplayKind }> {
   const row = await db
     .prepare(
       `SELECT p.secret_hash, p.expires_at, p.token_enc, d.kind
@@ -75,12 +79,15 @@ export async function pollPairing(
     )
     .bind(code)
     .first<{ secret_hash: string; expires_at: number; token_enc: string | null; kind: DisplayKind | null }>();
-  if (!row || !timingSafeEqual(row.secret_hash, await sha256Hex(secret))) return { status: 'expired' };
-  if (row.token_enc && row.kind) {
-    await db.prepare('DELETE FROM display_pairings WHERE code = ?1').bind(code).run();
-    return { status: 'paired', token: await decrypt(encKey, row.token_enc), kind: row.kind };
-  }
-  return row.expires_at < now ? { status: 'expired' } : { status: 'pending' };
+  if (!row) return { status: 'expired' };
+  if (!timingSafeEqual(row.secret_hash, await sha256Hex(secret))) return { status: 'invalid' };
+  if (row.expires_at < now) return { status: 'expired' };
+  if (!row.token_enc || !row.kind) return { status: 'pending' };
+  await db
+    .prepare('UPDATE display_pairings SET expires_at = MIN(expires_at, ?2) WHERE code = ?1')
+    .bind(code, now + DELIVERY_GRACE_MS)
+    .run();
+  return { status: 'paired', token: await decrypt(encKey, row.token_enc), kind: row.kind };
 }
 
 const lastSeenWrites = new Map<number, number>();

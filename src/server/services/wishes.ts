@@ -8,7 +8,14 @@ export class WishError extends Error {}
 const SEARCH_CACHE_MS = 15 * 60_000;
 const GLOBAL_SEARCH_LIMIT = 10;
 const GLOBAL_SEARCH_WINDOW_S = 30;
+const GLOBAL_TRACK_LIMIT = 10;
+const GLOBAL_TRACK_WINDOW_S = 30;
 const OPEN_WISHES_PER_DEVICE = 3;
+
+export interface UpvoteNetwork {
+  ipKey: string;
+  limit: number;
+}
 
 export function wishKey(id: number): string {
   return `FETE-${id}`;
@@ -67,6 +74,7 @@ export async function createWish(
   deviceId: string,
   uri: string,
   now: number,
+  network?: UpvoteNetwork,
 ): Promise<{ id: number; key: string; status: string; merged: boolean }> {
   const trackId = trackIdFromUri(uri);
   if (!trackId) throw new WishError('invalid_track');
@@ -78,6 +86,8 @@ export async function createWish(
 
   let track = await trackFromCache(db, uri);
   if (!track) {
+    const budget = await hitRateLimit(db, 'spotify:track', GLOBAL_TRACK_LIMIT, GLOBAL_TRACK_WINDOW_S, now);
+    if (!budget.allowed) throw new WishError('limited');
     const fetched = await spotify.track(trackId);
     if (!fetched.ok) throw new WishError('track_unavailable');
     track = fetched.value;
@@ -105,22 +115,38 @@ export async function createWish(
     .bind(song.id)
     .first<{ id: number; status: string }>();
   if (!existing) throw new WishError('wish_conflict');
-  await db
-    .prepare('INSERT OR IGNORE INTO wish_upvotes (wish_id, device_id, created_at) VALUES (?1, ?2, ?3)')
-    .bind(existing.id, deviceId, now)
-    .run();
+  await insertUpvote(db, existing.id, deviceId, now, network, true);
   return { id: existing.id, key: wishKey(existing.id), status: existing.status, merged: true };
 }
 
-export async function upvoteWish(db: D1Database, wishId: number, deviceId: string, now: number): Promise<boolean> {
+async function insertUpvote(
+  db: D1Database,
+  wishId: number,
+  deviceId: string,
+  now: number,
+  network: UpvoteNetwork | undefined,
+  allowOpen: boolean,
+): Promise<boolean> {
   const result = await db
     .prepare(
-      `INSERT OR IGNORE INTO wish_upvotes (wish_id, device_id, created_at)
-       SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM wishes WHERE id = ?1 AND status = 'approved')`,
+      `INSERT OR IGNORE INTO wish_upvotes (wish_id, device_id, ip_key, created_at)
+       SELECT ?1, ?2, ?4, ?3
+       WHERE EXISTS (SELECT 1 FROM wishes WHERE id = ?1 AND (status = 'approved' OR (?6 = 1 AND status = 'open')))
+         AND (?5 IS NULL OR (SELECT COUNT(*) FROM wish_upvotes WHERE wish_id = ?1 AND ip_key = ?4) < ?5)`,
     )
-    .bind(wishId, deviceId, now)
+    .bind(wishId, deviceId, now, network?.ipKey ?? null, network?.limit ?? null, allowOpen ? 1 : 0)
     .run();
   return result.meta.changes === 1;
+}
+
+export async function upvoteWish(
+  db: D1Database,
+  wishId: number,
+  deviceId: string,
+  now: number,
+  network?: UpvoteNetwork,
+): Promise<boolean> {
+  return insertUpvote(db, wishId, deviceId, now, network, false);
 }
 
 export interface WishView {

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 const de = {
   'lang.name': 'Deutsch',
@@ -7,6 +7,8 @@ const de = {
     'Zum Mitmachen einfach den QR-Code auf dem großen Bildschirm in der Halle mit der Handykamera scannen.',
   'guest.joining': 'Einen Moment …',
   'guest.qrExpired': 'Der QR-Code ist abgelaufen. Bitte einfach nochmal scannen.',
+  'guest.retry': 'Erneut versuchen',
+  'guest.unverified': 'Dein Gerät konnte nicht automatisch bestätigt werden. Pro Netz zählt deshalb nur eine Stimme.',
   'guest.tab.vote': 'Abstimmen',
   'guest.tab.wish': 'Wunsch',
   'guest.vote.title': 'Welcher Song soll laufen?',
@@ -22,6 +24,7 @@ const de = {
     'Von diesem Netz wurde in dieser Runde schon abgestimmt. In der nächsten Runde klappt es wieder.',
   'guest.error.round_closed': 'Diese Runde ist gerade zu Ende gegangen – die nächste startet sofort.',
   'guest.error.rate_limited': 'Kurz durchatmen – bitte gleich nochmal versuchen.',
+  'guest.error.vote_invalidated': 'Deine Stimme in dieser Runde wurde von der Moderation ungültig gesetzt.',
   'guest.error.generic': 'Das hat nicht geklappt. Bitte nochmal versuchen.',
   'guest.error.network': 'Keine Verbindung. Wir versuchen es automatisch erneut.',
   'guest.nowPlaying': 'Läuft gerade',
@@ -37,6 +40,8 @@ const de = {
   'guest.wish.limited': 'Gerade sehr viele Suchen – bitte gleich nochmal.',
   'guest.wish.error.too_many_open_wishes': 'Du hast schon 3 offene Wünsche. Warte, bis das Team sie geprüft hat.',
   'guest.wish.error.already_played': 'Der Song lief heute schon.',
+  'guest.wish.error.limited': 'Gerade sehr viele Wünsche – bitte gleich nochmal.',
+  'guest.wish.upvoteLimited': 'Von diesem Netz wurde dieser Wunsch schon unterstützt.',
   'guest.wish.empty': 'Noch keine Wünsche.',
   'status.open': 'In Prüfung',
   'status.approved': 'Freigegeben',
@@ -95,6 +100,8 @@ const en: Record<keyof typeof de, string> = {
   'guest.scan.text': 'To join, scan the QR code on the big screen in the hall with your phone camera.',
   'guest.joining': 'One moment …',
   'guest.qrExpired': 'The QR code has expired. Please scan it again.',
+  'guest.retry': 'Try again',
+  'guest.unverified': 'Your device could not be verified automatically, so only one vote per network counts.',
   'guest.tab.vote': 'Vote',
   'guest.tab.wish': 'Request',
   'guest.vote.title': 'Which song should play?',
@@ -109,6 +116,7 @@ const en: Record<keyof typeof de, string> = {
   'guest.error.ip_limit': 'Someone on this network already voted this round. Try again next round.',
   'guest.error.round_closed': 'This round just ended – the next one starts right away.',
   'guest.error.rate_limited': 'Take a breath – please try again in a moment.',
+  'guest.error.vote_invalidated': 'Your vote in this round was invalidated by the moderators.',
   'guest.error.generic': 'That did not work. Please try again.',
   'guest.error.network': 'No connection. Retrying automatically.',
   'guest.nowPlaying': 'Now playing',
@@ -124,6 +132,8 @@ const en: Record<keyof typeof de, string> = {
   'guest.wish.limited': 'Lots of searches right now – please try again shortly.',
   'guest.wish.error.too_many_open_wishes': 'You already have 3 open requests. Wait until the team has reviewed them.',
   'guest.wish.error.already_played': 'This song already played tonight.',
+  'guest.wish.error.limited': 'Lots of requests right now – please try again shortly.',
+  'guest.wish.upvoteLimited': 'This request has already been supported from your network.',
   'guest.wish.empty': 'No requests yet.',
   'status.open': 'In review',
   'status.approved': 'Approved',
@@ -200,14 +210,16 @@ const I18nContext = createContext<I18n | null>(null);
 
 export function I18nProvider({ children, fixed }: { children: ReactNode; fixed?: Language }) {
   const [lang, setLangState] = useState<Language>(() => fixed ?? initialLanguage());
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
   const setLang = useCallback((next: Language) => {
     setLangState(next);
     try {
       localStorage.setItem('lang', next);
     } catch {
-      document.documentElement.lang = next;
+      return;
     }
-    document.documentElement.lang = next;
   }, []);
   const value = useMemo<I18n>(
     () => ({

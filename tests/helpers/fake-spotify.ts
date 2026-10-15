@@ -12,7 +12,7 @@ export class FakeSpotify implements SpotifyApi {
   readonly log: PlayLogEntry[] = [];
   context: string[] = [];
   contextIndex = 0;
-  current: { uri: string; startedAt: number } | null = null;
+  current: { uri: string; startedAt: number; pausedAt: number | null } | null = null;
   failQueue: SpotifyResult<null> | null = null;
   maxQueueLength = 0;
   offline = false;
@@ -30,12 +30,27 @@ export class FakeSpotify implements SpotifyApi {
   }
 
   private start(uri: string, source: 'queue' | 'context', at = this.clock()) {
-    this.current = { uri, startedAt: at };
+    this.current = { uri, startedAt: at, pausedAt: null };
     this.log.push({ uri, startedAt: at, source });
   }
 
+  pause(): void {
+    this.advance();
+    if (this.current && this.current.pausedAt === null) this.current.pausedAt = this.clock();
+  }
+
+  resume(): void {
+    const current = this.current;
+    if (!current || current.pausedAt === null) return;
+    const pausedMs = this.clock() - current.pausedAt;
+    const entry = [...this.log].reverse().find((e) => e.uri === current.uri && e.startedAt === current.startedAt);
+    current.startedAt += pausedMs;
+    current.pausedAt = null;
+    if (entry) entry.startedAt = current.startedAt;
+  }
+
   advance(): void {
-    while (this.current) {
+    while (this.current && this.current.pausedAt === null) {
       const track = this.catalog.get(this.current.uri)!;
       const endsAt = this.current.startedAt + track.durationMs;
       if (endsAt > this.clock()) return;
@@ -56,8 +71,8 @@ export class FakeSpotify implements SpotifyApi {
     return {
       ok: true as const,
       value: {
-        isPlaying: true,
-        progressMs: this.clock() - this.current.startedAt,
+        isPlaying: this.current.pausedAt === null,
+        progressMs: (this.current.pausedAt ?? this.clock()) - this.current.startedAt,
         track: this.catalog.get(this.current.uri)!,
         contextUri: 'spotify:playlist:preshow',
       },

@@ -33,9 +33,12 @@ displayRoutes.post('/pair/start', async (c) => {
 displayRoutes.post('/pair/poll', async (c) => {
   const now = c.var.rt.now();
   const input = await body(c, z.object({ code: z.string().regex(/^\d{6}$/), secret: z.string().min(20).max(64) }));
-  const limited = await hitRateLimit(c.env.DB, `pair-poll:${input.code}`, 200, 600, now);
-  if (!limited.allowed) fail(429, 'rate_limited');
   const result = await pollPairing(c.env.DB, c.env.ENC_KEY, input.code, input.secret, now);
+  if (result.status === 'invalid') {
+    const limited = await hitRateLimit(c.env.DB, `pair-poll-fail:${await clientIpHash(c)}`, 30, 600, now);
+    if (!limited.allowed) fail(429, 'rate_limited');
+    return c.json({ status: 'expired' });
+  }
   if (result.status !== 'paired') return c.json(result);
   setCookie(c, DISPLAY_COOKIE, result.token, {
     path: '/',

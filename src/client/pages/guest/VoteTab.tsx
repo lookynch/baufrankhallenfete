@@ -22,6 +22,7 @@ export interface GuestState {
   eventName: string;
   pollAfterMs: number;
   verified?: boolean;
+  turnstileSiteKey?: string | null;
   voting?: { active: boolean; startsAt: number; endsAt: number | null };
   round?: { id: number; seq: number; level: number; expectedCloseAt: number; candidates: Candidate[] } | null;
   myVote?: number | null;
@@ -47,14 +48,19 @@ export function VoteTab({
   const round = state.round;
   const myVote = round && localVote?.roundId === round.id ? localVote.songId : (state.myVote ?? null);
   const remaining = round ? round.expectedCloseAt - now : 0;
+  const roundId = round?.id ?? null;
+  const ended = roundId !== null && remaining <= 0;
   const refreshScheduled = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!round || remaining > 0 || refreshScheduled.current === round.id) return;
-    refreshScheduled.current = round.id;
+    if (roundId === null || !ended || refreshScheduled.current === roundId) return;
+    refreshScheduled.current = roundId;
     const id = window.setTimeout(() => void refresh(), 2_000 + Math.random() * 15_000);
-    return () => window.clearTimeout(id);
-  }, [round, remaining, refresh]);
+    return () => {
+      window.clearTimeout(id);
+      if (refreshScheduled.current === roundId) refreshScheduled.current = null;
+    };
+  }, [roundId, ended, refresh]);
 
   async function vote(songId: number) {
     if (!round || pending) return;

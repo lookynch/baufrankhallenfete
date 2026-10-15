@@ -1,4 +1,4 @@
-import type { MoodLevel } from '../../shared/settings.ts';
+import { MIN_VOTING_MINUTES, type MoodLevel } from '../../shared/settings.ts';
 import type { SpotifyTrack } from './spotify-api.ts';
 
 export class LibraryError extends Error {}
@@ -200,10 +200,33 @@ export interface SetCoverage {
   defaultLevel: number;
   byLevel: Record<number, { songs: number; minutes: number }>;
   nearbyMinutes: number;
+  rampOk: boolean;
   ok: boolean;
 }
 
-export async function setCoverage(db: D1Database): Promise<SetCoverage[]> {
+type LevelCoverage = SetCoverage['byLevel'];
+
+function rampPossible(from: number, to: number, maxStep: number, covered: (level: number) => boolean): boolean {
+  const direction = Math.sign(to - from);
+  let current = from;
+  while (Math.abs(to - current) > maxStep) {
+    let next: number | null = null;
+    for (let step = maxStep; step >= 1 && next === null; step--) {
+      if (covered(current + direction * step)) next = current + direction * step;
+    }
+    if (next === null) return false;
+    current = next;
+  }
+  return true;
+}
+
+export async function setCoverage(
+  db: D1Database,
+  voting: { maxMoodStep: number; minRoundMinutes: number } = {
+    maxMoodStep: 1,
+    minRoundMinutes: MIN_VOTING_MINUTES,
+  },
+): Promise<SetCoverage[]> {
   const sets = await listSets(db);
   const { results } = await db
     .prepare(
@@ -216,12 +239,26 @@ export async function setCoverage(db: D1Database): Promise<SetCoverage[]> {
        GROUP BY ss.set_id, level`,
     )
     .all<{ set_id: number; level: number; songs: number; ms: number }>();
-  return sets.map((set) => {
-    const byLevel: SetCoverage['byLevel'] = {};
+  const levels = sets.map((set) => {
+    const byLevel: LevelCoverage = {};
     for (const level of [1, 2, 3, 4, 5]) byLevel[level] = { songs: 0, minutes: 0 };
     for (const row of results.filter((r) => r.set_id === set.id)) {
       byLevel[row.level] = { songs: row.songs, minutes: Math.round(row.ms / 60_000) };
     }
+    return byLevel;
+  });
+  return sets.map((set, index) => {
+    const byLevel = levels[index]!;
+    const previous = sets[index - 1];
+    const previousLevels = levels[index - 1];
+    const rampOk =
+      !previous ||
+      !previousLevels ||
+      rampPossible(previous.default_level, set.default_level, voting.maxMoodStep, (level) => {
+        const songs = (byLevel[level]?.songs ?? 0) + (previousLevels[level]?.songs ?? 0);
+        const minutes = (byLevel[level]?.minutes ?? 0) + (previousLevels[level]?.minutes ?? 0);
+        return songs >= 3 && minutes >= voting.minRoundMinutes + 4;
+      });
     const durationMinutes = Math.round((set.ends_at - set.starts_at) / 60_000);
     const nearbyMinutes = [set.default_level - 1, set.default_level, set.default_level + 1]
       .map((l) => byLevel[l]?.minutes ?? 0)
@@ -233,7 +270,8 @@ export async function setCoverage(db: D1Database): Promise<SetCoverage[]> {
       defaultLevel: set.default_level,
       byLevel,
       nearbyMinutes,
-      ok: nearbyMinutes >= durationMinutes * 1.5,
+      rampOk,
+      ok: rampOk && nearbyMinutes >= durationMinutes * 1.5,
     };
   });
 }

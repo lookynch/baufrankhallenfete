@@ -15,8 +15,10 @@ export interface LevelPlan {
   level: number;
   target: number;
   constrained: boolean;
+  matched: boolean;
 }
 
+const LEVELS = [1, 2, 3, 4, 5];
 const clampLevel = (level: number) => Math.min(5, Math.max(1, level));
 
 export function targetLevel(input: Omit<LevelPlanInput, 'isAvailable'>): number {
@@ -40,15 +42,22 @@ export function targetLevel(input: Omit<LevelPlanInput, 'isAvailable'>): number 
 export function planLevel(input: LevelPlanInput): LevelPlan {
   const target = targetLevel(input);
   const previous = clampLevel(input.previousLevel);
-  const delta = Math.max(-input.maxStep, Math.min(input.maxStep, target - previous));
-  const desired = clampLevel(previous + delta);
-  const direction = Math.sign(target - previous);
-  const preferences: number[] = [desired];
-  for (let step = Math.abs(delta) - 1; step >= 0; step--) preferences.push(clampLevel(previous + direction * step));
-  for (let step = 1; step <= input.maxStep; step++) preferences.push(clampLevel(previous - direction * step));
-  if (direction === 0) for (let step = 1; step <= input.maxStep; step++) preferences.push(clampLevel(previous + step));
-  for (const level of [...new Set(preferences)]) {
-    if (input.isAvailable(level)) return { level, target, constrained: level !== desired };
-  }
-  return { level: previous, target, constrained: true };
+  const desired = clampLevel(previous + Math.max(-input.maxStep, Math.min(input.maxStep, target - previous)));
+  const level = LEVELS.filter((l) => Math.abs(l - previous) <= input.maxStep)
+    .sort(
+      (a, b) =>
+        Math.abs(a - desired) - Math.abs(b - desired) ||
+        Math.abs(a - target) - Math.abs(b - target) ||
+        Math.abs(a - previous) - Math.abs(b - previous),
+    )
+    .find((l) => input.isAvailable(l));
+  if (level === undefined) return { level: previous, target, constrained: true, matched: false };
+  return { level, target, constrained: level !== desired, matched: true };
+}
+
+export function nearestLevel(previousLevel: number, target: number, isAvailable: (level: number) => boolean) {
+  const previous = clampLevel(previousLevel);
+  return LEVELS.filter(isAvailable).sort(
+    (a, b) => Math.abs(a - previous) - Math.abs(b - previous) || Math.abs(a - target) - Math.abs(b - target),
+  )[0];
 }

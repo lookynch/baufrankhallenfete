@@ -24,6 +24,7 @@ function seededRandom(seed: number) {
 interface Scenario {
   hours: number;
   spotifyOutage?: { from: number; to: number };
+  spotifyPause?: { from: number; to: number };
   votesPerRound?: number;
   tvOffline?: boolean;
 }
@@ -83,6 +84,9 @@ async function runEvening(scenario: Scenario) {
   while (clock.time < end) {
     const outage = scenario.spotifyOutage;
     spotify.offline = Boolean(outage && clock.time >= T0 + outage.from && clock.time < T0 + outage.to);
+    const pause = scenario.spotifyPause;
+    if (pause && clock.time >= T0 + pause.from && clock.time < T0 + pause.to) spotify.pause();
+    else spotify.resume();
     await tick(rt, { force: true });
     await rt.settle();
     const round = await openRound(db);
@@ -161,6 +165,28 @@ describe('Abendsimulation', () => {
       .prepare("SELECT COUNT(*) AS n FROM observed_plays WHERE kind = 'emergency'")
       .first<{ n: number }>();
     expect(emergencies?.n ?? 0).toBeGreaterThan(0);
+  });
+
+  it('spielt nach einer langen Pause jeden Song genau einmal und hält die Mindest-Abstimmzeit', async () => {
+    const { spotify, db } = await runEvening({
+      hours: 4,
+      spotifyPause: { from: 1.5 * HOUR, to: 1.5 * HOUR + 8 * MINUTE },
+    });
+    expect(spotify.maxQueueLength).toBeLessThanOrEqual(1);
+    const queued = spotify.log.filter((e) => e.source === 'queue');
+    expect(queued.length).toBeGreaterThan(30);
+    expect(new Set(queued.map((e) => e.uri)).size).toBe(queued.length);
+    const firstQueued = spotify.log.findIndex((e) => e.source === 'queue');
+    expect(spotify.log.slice(firstQueued).filter((e) => e.source === 'context')).toEqual([]);
+    const { results: rounds } = await db
+      .prepare("SELECT opened_at, closed_at FROM rounds WHERE status = 'closed'")
+      .all<{ opened_at: number; closed_at: number }>();
+    for (const round of rounds)
+      expect(round.closed_at - round.opened_at).toBeGreaterThanOrEqual(MIN_VOTING_MINUTES * MINUTE);
+    const missed = await db
+      .prepare("SELECT COUNT(*) AS n FROM playback WHERE status = 'missed'")
+      .first<{ n: number }>();
+    expect(missed?.n).toBe(0);
   });
 
   it('wählt auch ohne Stimmen Gewinner aus den Kandidaten der Runde', async () => {

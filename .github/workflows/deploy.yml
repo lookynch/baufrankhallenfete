@@ -73,6 +73,13 @@ jobs:
           trap 'rm -f "$file"' EXIT
           jq -n 'env | with_entries(select(.key | IN("SESSION_PEPPER","COOKIE_SECRET","QR_SECRET","IP_HASH_SECRET","BUZZER_HMAC_SECRET","ENC_KEY","SPOTIFY_CLIENT_ID","SPOTIFY_CLIENT_SECRET","TURNSTILE_SITE_KEY","TURNSTILE_SECRET","BOOTSTRAP_TOKEN","ACCESS_TEAM_DOMAIN","ACCESS_AUD","CF_ANALYTICS_TOKEN","CF_ACCOUNT_ID","PBKDF2_ITERATIONS")) | select(.value != ""))' > "$file"
           npx wrangler pages secret bulk "$file" --project-name "$PAGES_PROJECT"
+          present="$(npx wrangler pages secret list --project-name "$PAGES_PROJECT")"
+          for optional in SPOTIFY_CLIENT_ID SPOTIFY_CLIENT_SECRET TURNSTILE_SITE_KEY TURNSTILE_SECRET BOOTSTRAP_TOKEN ACCESS_TEAM_DOMAIN ACCESS_AUD CF_ANALYTICS_TOKEN PBKDF2_ITERATIONS; do
+            if [ -z "${!optional}" ] && grep -qE "^[[:space:]]*- $optional:" <<<"$present"; then
+              echo "Entferne $optional aus Pages (in GitHub nicht gesetzt)"
+              npx wrangler pages secret delete "$optional" --project-name "$PAGES_PROJECT"
+            fi
+          done
 
       - name: Deploy nach Cloudflare Pages
         run: npx wrangler pages deploy dist --project-name "$PAGES_PROJECT" --branch main --commit-hash "$GITHUB_SHA" --commit-dirty=true

@@ -3,7 +3,7 @@ import { Cover, MoodBadge } from '../../components/music.tsx';
 import { Badge, Button, Card, Empty, Input, Spinner } from '../../components/ui.tsx';
 import { api } from '../../lib/api.ts';
 import { formatDuration, formatTime, useNow } from '../../lib/time.ts';
-import { LevelPicker, PageTitle, useAdmin, useAdminData } from './shared.tsx';
+import { LevelPicker, PageTitle, useAdmin, useAdminData, useInFlight } from './shared.tsx';
 
 interface RoundsData {
   round: {
@@ -49,7 +49,8 @@ interface Settings {
 }
 
 export function RoundsPage() {
-  const { run } = useAdmin();
+  const { run, notify } = useAdmin();
+  const { busy, guard } = useInFlight();
   const now = useNow(1000);
   const { data, reload } = useAdminData<RoundsData>('/api/admin/rounds/current', 8_000);
   const settings = useAdminData<Settings>('/api/admin/settings');
@@ -61,9 +62,20 @@ export function RoundsPage() {
   if (!data) return <Spinner />;
   const round = data.round;
 
-  async function act(path: string, body: unknown = {}, success = 'Erledigt') {
-    await run(() => api.post(path, body), success);
-    await reload();
+  function act(path: string, body: unknown = {}, success = 'Erledigt') {
+    return guard(path, async () => {
+      await run(() => api.post(path, body), success);
+      await reload();
+    });
+  }
+
+  function closeRound() {
+    return guard('close', async () => {
+      const result = await run(() => api.post<{ closeAt?: number }>('/api/admin/rounds/close'));
+      if (result?.closeAt) notify(`Mindest-Abstimmzeit läuft noch – Runde endet um ${formatTime(result.closeAt)} Uhr`);
+      else if (result) notify('Runde beendet');
+      await reload();
+    });
   }
 
   async function searchSongs() {
@@ -87,15 +99,16 @@ export function RoundsPage() {
             <>
               <Button
                 variant="outline"
-                onClick={() =>
-                  confirm('Runde jetzt beenden und Gewinner übernehmen?') &&
-                  void act('/api/admin/rounds/close', {}, 'Runde beendet')
-                }
+                busy={busy === 'close'}
+                disabled={busy !== null}
+                onClick={() => confirm('Runde jetzt beenden und Gewinner übernehmen?') && void closeRound()}
               >
                 Runde jetzt beenden
               </Button>
               <Button
                 variant="danger"
+                busy={busy === '/api/admin/rounds/skip'}
+                disabled={busy !== null}
                 onClick={() =>
                   confirm('Runde verwerfen (keine Gewinner) und neu starten?') &&
                   void act('/api/admin/rounds/skip', {}, 'Runde übersprungen')
@@ -182,6 +195,7 @@ export function RoundsPage() {
                       <Button
                         size="sm"
                         variant="danger"
+                        disabled={busy !== null}
                         onClick={() =>
                           confirm('Alle Stimmen dieses Netzes in der Runde ungültig machen?') &&
                           void act(
@@ -229,6 +243,7 @@ export function RoundsPage() {
                     <Button
                       size="sm"
                       variant="ghost"
+                      disabled={busy !== null}
                       onClick={() => void act(`/api/admin/playback/${e.id}/move`, { direction: 'up' })}
                       aria-label="Nach oben"
                     >
@@ -237,6 +252,7 @@ export function RoundsPage() {
                     <Button
                       size="sm"
                       variant="ghost"
+                      disabled={busy !== null}
                       onClick={() => void act(`/api/admin/playback/${e.id}/move`, { direction: 'down' })}
                       aria-label="Nach unten"
                     >
@@ -245,6 +261,7 @@ export function RoundsPage() {
                     <Button
                       size="sm"
                       variant="danger"
+                      disabled={busy !== null}
                       onClick={() => void act(`/api/admin/playback/${e.id}/cancel`, {}, 'Song entfernt')}
                     >
                       Entfernen
@@ -282,10 +299,18 @@ export function RoundsPage() {
                 </span>
                 <Button
                   size="sm"
-                  onClick={async () => {
-                    await act('/api/admin/playback/insert', { songId: s.id }, 'Eingeplant');
-                    setSongResults([]);
-                  }}
+                  busy={busy === `insert-${s.id}`}
+                  disabled={busy !== null}
+                  onClick={() =>
+                    void guard(`insert-${s.id}`, async () => {
+                      const done = await run(
+                        () => api.post('/api/admin/playback/insert', { songId: s.id }),
+                        'Eingeplant',
+                      );
+                      if (done) setSongResults([]);
+                      await reload();
+                    })
+                  }
                 >
                   Einplanen
                 </Button>

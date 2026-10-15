@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { Cover, MoodBadge } from '../../components/music.tsx';
 import { Badge, Button, Card, Empty, Field, Input, Notice, Select, Spinner } from '../../components/ui.tsx';
 import { api } from '../../lib/api.ts';
 import { berlinParts, formatDateTime, formatDayTime, formatTime, fromBerlin } from '../../lib/time.ts';
-import { LevelPicker, PageTitle, useAdmin, useAdminData } from './shared.tsx';
+import { LevelPicker, PageTitle, useAdmin, useAdminData, useInFlight } from './shared.tsx';
 
 interface SetRow {
   id: number;
@@ -167,17 +167,18 @@ function Library({ sets }: { sets: SetRow[] }) {
 
 function AddSongs({ sets, onChange }: { sets: SetRow[]; onChange: () => Promise<void> }) {
   const { run, notify } = useAdmin();
-  const [setId, setSetId] = useState<string>('');
+  const [setId, setSetId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Track[]>([]);
   const [reference, setReference] = useState('');
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const importing = useRef(false);
   const playlists = useAdminData<{
     playlists: Array<{ uri: string; id: string; name: string; trackCount: number; owner: string }>;
   }>('/api/admin/spotify/playlists');
 
   useEffect(() => {
-    if (!setId && sets[0]) setSetId(String(sets[0].id));
+    if (setId === null && sets[0]) setSetId(String(sets[0].id));
   }, [sets, setId]);
 
   async function search() {
@@ -188,25 +189,36 @@ function AddSongs({ sets, onChange }: { sets: SetRow[]; onChange: () => Promise<
   }
 
   async function importReference(ref: string) {
+    if (importing.current) return;
+    importing.current = true;
     let offset = 0;
     let imported = 0;
+    let failed = false;
     setProgress({ done: 0, total: 1 });
-    for (;;) {
-      const page = await run(() =>
-        api.post<{ imported: number; next: number | null; total: number }>('/api/admin/library/import', {
-          reference: ref,
-          setId: setId ? Number(setId) : null,
-          offset,
-        }),
-      );
-      if (!page) break;
-      imported += page.imported;
-      setProgress({ done: Math.min(page.total, offset + 50), total: page.total });
-      if (page.next === null) break;
-      offset = page.next;
+    try {
+      for (;;) {
+        const page = await run(() =>
+          api.post<{ imported: number; next: number | null; total: number }>('/api/admin/library/import', {
+            reference: ref,
+            setId: setId ? Number(setId) : null,
+            offset,
+          }),
+        );
+        if (!page) {
+          failed = true;
+          break;
+        }
+        imported += page.imported;
+        setProgress({ done: Math.min(page.total, offset + 50), total: page.total });
+        if (page.next === null) break;
+        offset = page.next;
+      }
+    } finally {
+      importing.current = false;
+      setProgress(null);
     }
-    setProgress(null);
-    notify(`${imported} Songs importiert`);
+    if (!failed) notify(`${imported} Songs importiert`);
+    else if (imported > 0) notify(`Import abgebrochen: ${imported} Songs importiert, Rest fehlgeschlagen`, 'danger');
     await onChange();
   }
 
@@ -214,7 +226,7 @@ function AddSongs({ sets, onChange }: { sets: SetRow[]; onChange: () => Promise<
     <div className="grid gap-6 xl:grid-cols-2">
       <Card title="Ziel-Set">
         <Field label="Neue Songs landen in diesem Set" hint="Ohne eigenes Level gilt das Standard-Level des Sets.">
-          <Select value={setId} onChange={(e) => setSetId(e.target.value)}>
+          <Select value={setId ?? ''} onChange={(e) => setSetId(e.target.value)}>
             <option value="">Nur Bibliothek (kein Set)</option>
             {sets.map((s) => (
               <option key={s.id} value={s.id}>
@@ -301,7 +313,7 @@ function AddSongs({ sets, onChange }: { sets: SetRow[]; onChange: () => Promise<
                 <div className="truncate text-sm text-muted">{track.artist}</div>
               </div>
               {track.known ? <Badge tone="success">in Bibliothek</Badge> : null}
-              <Button size="sm" onClick={() => void importReference(track.uri)}>
+              <Button size="sm" disabled={progress !== null} onClick={() => void importReference(track.uri)}>
                 Hinzufügen
               </Button>
             </li>
@@ -320,6 +332,7 @@ function Sets({
   reload: () => Promise<void>;
 }) {
   const { run } = useAdmin();
+  const { busy, guard } = useInFlight();
   const settings = useAdminData<{ event: { startsAt: number; endsAt: number }; voting: { startsAt: number } }>(
     '/api/admin/settings',
   );
@@ -330,7 +343,7 @@ function Sets({
   const position = (t: number) => `${Math.min(100, Math.max(0, ((t - event.startsAt) / span) * 100))}%`;
   const coverage = new Map(data.coverage.map((c) => [c.setId, c]));
 
-  async function save() {
+  function save() {
     if (!editing) return;
     const body = {
       name: editing.name,
@@ -338,14 +351,16 @@ function Sets({
       ends_at: editing.ends_at,
       default_level: editing.default_level,
     };
-    const ok = await run(
-      () => (editing.id ? api.put(`/api/admin/sets/${editing.id}`, body) : api.post('/api/admin/sets', body)),
-      'Set gespeichert',
-    );
-    if (ok !== undefined) {
-      setEditing(null);
-      await reload();
-    }
+    void guard('save', async () => {
+      const ok = await run(
+        () => (editing.id ? api.put(`/api/admin/sets/${editing.id}`, body) : api.post('/api/admin/sets', body)),
+        'Set gespeichert',
+      );
+      if (ok !== undefined) {
+        setEditing(null);
+        await reload();
+      }
+    });
   }
 
   return (
@@ -433,16 +448,18 @@ function Sets({
         <SetEditor
           value={editing}
           onChange={setEditing}
+          saving={busy !== null}
           onSave={save}
           onCancel={() => setEditing(null)}
           onDelete={
             editing.id
-              ? async () => {
-                  if (!confirm('Set löschen? Songs bleiben in der Bibliothek.')) return;
-                  await run(() => api.post(`/api/admin/sets/${editing.id}/delete`), 'Set gelöscht');
-                  setEditing(null);
-                  await reload();
-                }
+              ? () =>
+                  void guard('delete', async () => {
+                    if (!confirm('Set löschen? Songs bleiben in der Bibliothek.')) return;
+                    await run(() => api.post(`/api/admin/sets/${editing.id}/delete`), 'Set gelöscht');
+                    setEditing(null);
+                    await reload();
+                  })
               : undefined
           }
         />
@@ -454,12 +471,14 @@ function Sets({
 function SetEditor({
   value,
   onChange,
+  saving,
   onSave,
   onCancel,
   onDelete,
 }: {
   value: Partial<SetRow>;
   onChange: (v: Partial<SetRow>) => void;
+  saving: boolean;
   onSave: () => void;
   onCancel: () => void;
   onDelete?: () => void;
@@ -514,12 +533,14 @@ function SetEditor({
           </Field>
         </div>
         <div className="flex flex-wrap gap-2 sm:col-span-2">
-          <Button type="submit">Speichern</Button>
+          <Button type="submit" busy={saving}>
+            Speichern
+          </Button>
           <Button variant="ghost" onClick={onCancel}>
             Abbrechen
           </Button>
           {onDelete ? (
-            <Button variant="danger" className="ml-auto" onClick={onDelete}>
+            <Button variant="danger" className="ml-auto" disabled={saving} onClick={onDelete}>
               Löschen
             </Button>
           ) : null}
@@ -530,7 +551,8 @@ function SetEditor({
 }
 
 function SpotifyPanel() {
-  const { run } = useAdmin();
+  const { run, notify } = useAdmin();
+  const { busy, guard } = useInFlight();
   const status = useAdminData<{
     configured: boolean;
     connected: boolean;
@@ -561,9 +583,13 @@ function SpotifyPanel() {
     if (result) window.location.href = result.url;
   }
 
-  async function command(action: 'skip' | 'repeat' | 'preshow') {
-    await run(() => api.post(`/api/admin/spotify/${action}`), 'Befehl gesendet');
-    await player.reload();
+  function command(action: 'skip' | 'repeat' | 'preshow') {
+    return guard(action, async () => {
+      const result = await run(() => api.post<{ ok: boolean; error?: string }>(`/api/admin/spotify/${action}`));
+      if (result?.ok) notify('Befehl gesendet');
+      else if (result) notify(`Spotify hat abgelehnt: ${spotifyError(result.error)}`, 'danger');
+      await player.reload();
+    });
   }
 
   async function savePreshow(level?: number) {
@@ -633,18 +659,33 @@ function SpotifyPanel() {
           </dl>
         ) : (
           <Notice tone="warning">
-            Kein aktives Gerät gefunden ({player.data?.error ?? '…'}). Spotify auf dem Abspielgerät öffnen und kurz
-            abspielen.
+            Kein aktives Gerät gefunden ({player.data ? spotifyError(player.data.error) : '…'}). Spotify auf dem
+            Abspielgerät öffnen und kurz abspielen.
           </Notice>
         )}
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => void command('preshow')}>
+          <Button
+            variant="outline"
+            busy={busy === 'preshow'}
+            disabled={busy !== null}
+            onClick={() => void command('preshow')}
+          >
             Vorprogramm starten
           </Button>
-          <Button variant="outline" onClick={() => void command('repeat')}>
+          <Button
+            variant="outline"
+            busy={busy === 'repeat'}
+            disabled={busy !== null}
+            onClick={() => void command('repeat')}
+          >
             Wiederholung an
           </Button>
-          <Button variant="danger" onClick={() => confirm('Aktuellen Song überspringen?') && void command('skip')}>
+          <Button
+            variant="danger"
+            busy={busy === 'skip'}
+            disabled={busy !== null}
+            onClick={() => confirm('Aktuellen Song überspringen?') && void command('skip')}
+          >
             Song überspringen
           </Button>
         </div>
@@ -700,6 +741,20 @@ function PreshowCheck() {
       </Notice>
     </div>
   );
+}
+
+const spotifyErrors: Record<string, string> = {
+  not_connected: 'Spotify ist nicht verbunden',
+  no_device: 'kein aktives Abspielgerät',
+  rate_limited: 'zu viele Anfragen, kurz warten',
+  unauthorized: 'Freigabe ungültig, neu verbinden',
+  not_found: 'nicht gefunden',
+  client_error: 'Anfrage abgelehnt',
+  unknown: 'unbekannter Fehler',
+};
+
+function spotifyError(kind: string | undefined): string {
+  return (kind && spotifyErrors[kind]) ?? kind ?? 'unbekannter Fehler';
 }
 
 function normalizePlaylist(input: string): string {

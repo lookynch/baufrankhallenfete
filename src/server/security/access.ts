@@ -7,13 +7,18 @@ interface Jwk {
   e: string;
 }
 
+const JWKS_TTL_MS = 3_600_000;
+const JWKS_REFRESH_MIN_MS = 60_000;
 const jwksCache = new Map<string, { keys: Jwk[]; fetchedAt: number }>();
 
-async function loadKeys(teamDomain: string, now: number, fetcher: typeof fetch): Promise<Jwk[]> {
+async function loadKeys(teamDomain: string, now: number, fetcher: typeof fetch, refresh = false): Promise<Jwk[]> {
   const cached = jwksCache.get(teamDomain);
-  if (cached && now - cached.fetchedAt < 3_600_000) return cached.keys;
+  if (cached && now - cached.fetchedAt < (refresh ? JWKS_REFRESH_MIN_MS : JWKS_TTL_MS)) return cached.keys;
   const response = await fetcher(`https://${teamDomain}/cdn-cgi/access/certs`);
-  if (!response.ok) throw new Error('access certs unavailable');
+  if (!response.ok) {
+    if (cached) return cached.keys;
+    throw new Error('access certs unavailable');
+  }
   const { keys } = (await response.json()) as { keys: Jwk[] };
   jwksCache.set(teamDomain, { keys, fetchedAt: now });
   return keys;
@@ -41,7 +46,9 @@ export async function verifyAccessJwt(
     if (!audiences.includes(audience)) return false;
     if (typeof payload.exp !== 'number' || payload.exp * 1000 < now) return false;
     if (payload.iss !== `https://${teamDomain}`) return false;
-    const jwk = (await loadKeys(teamDomain, now, fetcher)).find((k) => k.kid === header.kid);
+    const byKid = (keys: Jwk[]) => keys.find((k) => k.kid === header.kid);
+    const jwk =
+      byKid(await loadKeys(teamDomain, now, fetcher)) ?? byKid(await loadKeys(teamDomain, now, fetcher, true));
     if (!jwk) return false;
     const key = await crypto.subtle.importKey(
       'jwk',

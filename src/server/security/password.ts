@@ -1,7 +1,8 @@
 import { base64UrlDecode, base64UrlEncode, hmacBytes, randomBytes, timingSafeEqual } from './crypto.ts';
 
-export const DEFAULT_PBKDF2_ITERATIONS = 50_000;
-const MAX_ITERATIONS = 100_000;
+export const DEFAULT_PBKDF2_ITERATIONS = 20_000;
+export const MAX_PBKDF2_ITERATIONS = 30_000;
+const MIN_ITERATIONS = 10_000;
 const MIN_LENGTH = 12;
 
 const commonPasswords = new Set([
@@ -37,8 +38,8 @@ async function derive(password: string, pepper: string, salt: Uint8Array<ArrayBu
 
 export function iterationsFrom(value: string | undefined): number {
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 10_000) return DEFAULT_PBKDF2_ITERATIONS;
-  return Math.min(parsed, MAX_ITERATIONS);
+  if (!Number.isInteger(parsed) || parsed < MIN_ITERATIONS) return DEFAULT_PBKDF2_ITERATIONS;
+  return Math.min(parsed, MAX_PBKDF2_ITERATIONS);
 }
 
 export async function hashPassword(password: string, pepper: string, iterations: number): Promise<string> {

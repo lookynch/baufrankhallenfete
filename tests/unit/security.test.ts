@@ -10,7 +10,14 @@ import {
 } from '../../src/server/security/crypto.ts';
 import { decodeGuest, encodeGuest } from '../../src/server/security/guest.ts';
 import { normalizeIp } from '../../src/server/security/ip.ts';
-import { hashPassword, passwordProblem, verifyPassword } from '../../src/server/security/password.ts';
+import {
+  DEFAULT_PBKDF2_ITERATIONS,
+  hashPassword,
+  iterationsFrom,
+  MAX_PBKDF2_ITERATIONS,
+  passwordProblem,
+  verifyPassword,
+} from '../../src/server/security/password.ts';
 import { presenceToken, verifyPresenceToken } from '../../src/server/security/presence.ts';
 import { hitRateLimit } from '../../src/server/security/ratelimit.ts';
 import { base32Decode, base32Encode, totpCode, verifyTotp } from '../../src/server/security/totp.ts';
@@ -52,6 +59,22 @@ describe('Passwörter', () => {
     expect((await verifyPassword('ein sehr gutes Passwort!', hash, 'pepper')).ok).toBe(true);
     expect((await verifyPassword('ein sehr gutes Passwort?', hash, 'pepper')).ok).toBe(false);
     expect((await verifyPassword('ein sehr gutes Passwort!', hash, 'anderer-pepper')).ok).toBe(false);
+  });
+
+  it('hält PBKDF2 im CPU-Budget des Free-Tiers', () => {
+    expect(DEFAULT_PBKDF2_ITERATIONS).toBe(20_000);
+    expect(MAX_PBKDF2_ITERATIONS).toBe(30_000);
+    expect(iterationsFrom(undefined)).toBe(DEFAULT_PBKDF2_ITERATIONS);
+    expect(iterationsFrom('abc')).toBe(DEFAULT_PBKDF2_ITERATIONS);
+    expect(iterationsFrom('9999')).toBe(DEFAULT_PBKDF2_ITERATIONS);
+    expect(iterationsFrom('12000')).toBe(12_000);
+    expect(iterationsFrom('50000')).toBe(MAX_PBKDF2_ITERATIONS);
+    expect(iterationsFrom('100000')).toBe(MAX_PBKDF2_ITERATIONS);
+  });
+
+  it('prüft Hashes mit der gespeicherten Iterationszahl', async () => {
+    const hash = await hashPassword('ein sehr gutes Passwort!', 'pepper', 12_000);
+    expect(await verifyPassword('ein sehr gutes Passwort!', hash, 'pepper')).toEqual({ ok: true, iterations: 12_000 });
   });
 
   it('lehnt schwache Passwörter ab', () => {

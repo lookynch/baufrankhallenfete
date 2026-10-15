@@ -257,7 +257,10 @@ export function consumptionStats(rows: Bucket[], settings: Settings, now: number
   }
   const totalCrates = rows.reduce((s, r) => s + r.crates, 0);
   const totalCostCents = rows.reduce((s, r) => s + r.cost_cents, 0);
-  const cratesLastHour = rows.filter((r) => r.bucket_start >= now - 3_600_000).reduce((s, r) => s + r.crates, 0);
+  const currentBucket = bucketOf(now);
+  const cratesLastHour = rows
+    .filter((r) => r.bucket_start >= currentBucket - 3_600_000 && r.bucket_start < currentBucket)
+    .reduce((s, r) => s + r.crates, 0);
   const elapsedHours = Math.max(0.25, (Math.min(now, settings.event.endsAt) - settings.event.startsAt) / 3_600_000);
   const ratePerHour = cratesLastHour > 0 ? cratesLastHour : totalCrates / elapsedHours;
   const remainingHours = Math.max(0, (settings.event.endsAt - now) / 3_600_000);

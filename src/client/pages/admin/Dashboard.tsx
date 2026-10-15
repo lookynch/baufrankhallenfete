@@ -34,6 +34,8 @@ interface DashboardData {
   }>;
   stats: { totalCrates: number; totalCostCents: number; ratePerHour: number };
   settings: { voting: { enabled: boolean; startsAt: number }; event: { startsAt: number; endsAt: number } };
+  turnstileConfigured: boolean;
+  accessConfigured: boolean;
 }
 
 function ago(now: number, at: number | null | undefined): string {
@@ -67,6 +69,10 @@ export function Dashboard() {
   }
   if ((data.budget?.fraction ?? 0) >= 0.6)
     warnings.push('Request-Budget über 60 % – Polling wird automatisch gedrosselt.');
+  if (!data.turnstileConfigured) warnings.push('Turnstile nicht konfiguriert – Gäste werden nur per IP begrenzt.');
+  const hints: string[] = [];
+  if (!data.accessConfigured)
+    hints.push('Cloudflare Access ist nicht eingerichtet – der Adminbereich ist nur durch Passwort und 2FA geschützt.');
 
   return (
     <div className="flex flex-col gap-6">
@@ -82,6 +88,9 @@ export function Dashboard() {
       ) : (
         <Notice tone="success">Alles im grünen Bereich.</Notice>
       )}
+      {hints.map((h) => (
+        <Notice key={h}>{h}</Notice>
+      ))}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat

@@ -23,7 +23,8 @@
 - [ ] Testbuchungen storniert oder Eventzeitraum so gesetzt, dass Testdrücke abgelehnt werden.
 - [ ] Mit 3 Personen ohne Erklärung QR scannen und abstimmen lassen. Ziel: unter 10 Sekunden.
 - [ ] Im Dashboard die Zahl „Requests heute“ mit dem Cloudflare-Dashboard abgeglichen.
-- [ ] PBKDF2-Login-Zeit mit `wrangler pages deployment tail` geprüft (CPU unter 10 ms).
+- [ ] PBKDF2-Login-Zeit mit `wrangler pages deployment tail` geprüft (CPU unter 10 ms, Standard 20.000 Iterationen, max. 30.000).
+- [ ] Admins mit Passwort aus älteren Versionen (50.000 Iterationen) per Einladung mit Reset neu eingeladen.
 
 ## Musik
 
@@ -43,12 +44,13 @@
   - Buzzer-PC online
   - TV online
   - Sets grün
+  - Turnstile und Access konfiguriert (ohne Turnstile gelten alle Gäste als verifiziert)
 - [ ] Buzzer-Agent läuft. Ein Testdruck erscheint unter „Buzzer“ und wird gleich wieder storniert.
 
 ## Während des Abends
 
 - [ ] Gelegentlich das Dashboard prüfen:
-  - IP-Ablehnungen (bei vielen das IPv4-Limit erhöhen)
+  - IP-Ablehnungen (bei vielen das IPv4- bzw. IPv6-/48-Limit `votesPerNetV6` erhöhen)
   - Notfall-Songs
   - Requests heute
 - [ ] Songwünsche unter „Wünsche“ freigeben (Set und Level wählen).
@@ -61,11 +63,12 @@
 | App, Internet oder Spotify-API weg | Musik läuft über die Vorprogramm-Playlist weiter. Getränke per Strichliste, später unter „Buchhaltung“ nachbuchen. |
 | Song gehört nicht hierher          | „Voting & Queue“ → Song entfernen oder verschieben. Spotify → „Song überspringen“.                                 |
 | Falsches Stimmungslevel            | Level der nächsten Runde unter „Voting & Queue“ setzen.                                                            |
-| Admin ausgesperrt                  | Anderer Owner entsperrt unter „Audit & Sicherheit → Rate-Limits“ bzw. lädt neu ein (Passwort- und 2FA-Reset).      |
+| Admin ausgesperrt                  | Anderer Owner entsperrt unter „Audit & Sicherheit → Rate-Limits“ bzw. lädt mit Reset neu ein (Passwort und 2FA).   |
 | Display zeigt Kopplungscode        | Im Admin unter „Displays“ den Code eingeben.                                                                       |
 
 ## Danach
 
 - [ ] Verbrauchsprotokoll (CSV) an die Buchhaltung.
 - [ ] „Eventdaten bereinigen“ (Owner) ausführen.
-- [ ] Bootstrap-Token und nicht mehr benötigte Admins entfernen.
+- [ ] `BOOTSTRAP_TOKEN` in GitHub löschen und Deploy erneut ausführen (entfernt ihn auch aus Pages).
+- [ ] Nicht mehr benötigte Admins deaktivieren (offene Einladungen werden dabei widerrufen).
