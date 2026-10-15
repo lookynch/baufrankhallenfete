@@ -5,5 +5,5 @@ compatibility_date = "2026-09-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "fete"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "2cd27cef-972a-410e-9e1e-3ba41e593f40"
 migrations_dir = "migrations"
