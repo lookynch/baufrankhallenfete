@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 const MINUTE = 60_000;
 
+export const MAX_EVENT_MS = 48 * 3_600_000;
+
 export const MIN_VOTING_MINUTES = 17;
 
 export const moodLevels = [1, 2, 3, 4, 5] as const;

@@ -49,6 +49,7 @@ const messages: Record<string, string> = {
   ledger_accounts_must_differ: 'Vorrats-, Aufwands- und Verbindlichkeitskonto müssen verschieden sein.',
   unknown_ledger_account: 'Unbekanntes Konto – erst unter Buchhaltung anlegen.',
   event_end_before_start: 'Das Event-Ende muss nach dem Beginn liegen.',
+  event_too_long: 'Ein Event darf höchstens 48 Stunden dauern.',
   voting_end_before_start: 'Das Voting-Ende muss nach dem Voting-Start liegen.',
   song_already_scheduled: 'Der Song ist bereits eingeplant.',
   song_is_round_candidate: 'Der Song steht gerade zur Wahl.',

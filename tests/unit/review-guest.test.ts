@@ -217,7 +217,7 @@ describe('Gast-Beitritt', () => {
 
   it('begrenzt das Cookie auf 24 h und verlängert es bei erneutem Beitritt nicht', async () => {
     const h = new Harness();
-    await saveSettings(h.env.DB, 'event', { startsAt: T0, endsAt: T0 + 30 * 24 * 3_600_000 }, T0, null);
+    await saveSettings(h.env.DB, 'event', { startsAt: T0, endsAt: T0 + 40 * 3_600_000 }, T0, null);
     const joined = await h.join('203.0.113.7');
     expect(joined.maxAge).toBe(24 * 3600);
     h.clock.advance(3_600_000);

@@ -1,4 +1,10 @@
-import { defaultSettings, settingsSchemas, type Settings, type SettingsKey } from '../../shared/settings.ts';
+import {
+  defaultSettings,
+  MAX_EVENT_MS,
+  settingsSchemas,
+  type Settings,
+  type SettingsKey,
+} from '../../shared/settings.ts';
 
 export class SettingsError extends Error {}
 
@@ -20,6 +26,7 @@ export async function loadSettings(db: D1Database, now: number): Promise<Setting
 
 export function validateSettings(settings: Settings): void {
   if (settings.event.endsAt <= settings.event.startsAt) throw new SettingsError('event_end_before_start');
+  if (settings.event.endsAt - settings.event.startsAt > MAX_EVENT_MS) throw new SettingsError('event_too_long');
   if (settings.voting.endsAt !== null && settings.voting.endsAt <= settings.voting.startsAt) {
     throw new SettingsError('voting_end_before_start');
   }

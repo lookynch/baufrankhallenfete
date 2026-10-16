@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { guestCoversAllowed, readBudget, refreshBudget, throttleFactor } from '../../src/server/services/budget.ts';
 import { importTracks, saveSet, setCoverage } from '../../src/server/services/library.ts';
+import { consumptionStats } from '../../src/server/services/ledger.ts';
+import { loadSettings, saveSettings } from '../../src/server/services/settings.ts';
 import {
   authStatus,
   exchangeCode,
@@ -350,6 +352,18 @@ describe('Songwünsche', () => {
       .bind(third.id)
       .first<{ status: string }>();
     expect(status?.status).toBe('open');
+  });
+});
+
+describe('Event-Dauer', () => {
+  it('lehnt Events über 48 h ab und begrenzt die Verbrauchskurve auch für Altwerte', async () => {
+    const { DB: db } = testEnv();
+    await expect(saveSettings(db, 'event', { startsAt: NOW, endsAt: NOW + 49 * 3_600_000 }, NOW, null)).rejects.toThrow(
+      'event_too_long',
+    );
+    const settings = await loadSettings(db, NOW);
+    const stats = consumptionStats([], { ...settings, event: { ...settings.event, startsAt: 0, endsAt: NOW } }, NOW);
+    expect(stats.series.length).toBeLessThanOrEqual(48 * 4 + 1);
   });
 });
 
