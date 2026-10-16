@@ -132,6 +132,7 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser, ba
   await expect(tv.getByText(/Runde 1/)).toBeVisible({ timeout: 30_000 });
   await expect(tv.locator('img[src^="/api/cover/"]').first()).toBeVisible();
   await expect(tv.getByText(/^Datenschutz & Impressum: .+\/datenschutz$/)).toBeVisible();
+  await expect(tv.getByRole('img', { name: 'Musikdaten von Spotify' })).toBeVisible();
   const qrUrl = await qr.getAttribute('data-qr-url');
   expect(qrUrl).toMatch(/\/v\/[A-Z2-7]{8}$/);
 
@@ -150,12 +151,24 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser, ba
   await expect(cover).toHaveAttribute('src', /^\/api\/cover\/[0-9a-f]{40}$/);
   await expect(cover).toHaveJSProperty('naturalWidth', 1);
   await expect(guest.locator('img[src*="scdn"]')).toHaveCount(0);
+  const spotifyLink = guest.locator('ul li').first().getByRole('link', { name: 'Open Spotify' });
+  await expect(spotifyLink).toHaveAttribute('href', /^https:\/\/open\.spotify\.com\/track\/e2esong\d{4}abcdefgh$/);
+  await expect(spotifyLink).toHaveAttribute('target', '_blank');
+  await expect(spotifyLink).toHaveAttribute('rel', 'noopener noreferrer');
+  await expect(guest.locator('ul li button a')).toHaveCount(0);
+  await expect(guest.getByRole('img', { name: 'Musikdaten von Spotify' })).toBeVisible();
   await guest.screenshot({ path: join(shots, 'guest-vote.png'), fullPage: true });
   await guest.locator('ul li button').first().click();
   await expect(guest.getByText('Stimme gespeichert!')).toBeVisible();
-  await expect(guest.getByText('✓ Deine Stimme')).toBeVisible();
+  const mine = guest.getByText('✓ Deine Stimme');
+  await expect(mine).toBeVisible();
+  const chosen = guest.locator('ul li').filter({ has: guest.locator('button[aria-pressed="true"]') });
+  const [badgeBox, artBox] = await Promise.all([mine.boundingBox(), chosen.locator('img').boundingBox()]);
+  expect(badgeBox!.y).toBeGreaterThanOrEqual(artBox!.y + artBox!.height);
+  await guest.screenshot({ path: join(shots, 'guest-voted.png'), fullPage: true });
   await guest.getByRole('button', { name: /Wunsch/ }).click();
   await expect(guest.getByText('Dein Songwunsch')).toBeVisible();
+  await expect(guest.getByRole('img', { name: 'Musikdaten von Spotify' })).toBeVisible();
   await expect(guest.getByRole('link', { name: 'Datenschutz' })).toBeVisible();
   await expect(guest.getByRole('link', { name: 'Impressum' })).toBeVisible();
   await guest.screenshot({ path: join(shots, 'guest-wish.png'), fullPage: true });
@@ -196,6 +209,10 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser, ba
     await bar.waitForTimeout(1_000);
     await bar.screenshot({ path: join(shots, `${kind}.png`) });
   }
+
+  await admin.goto('/admin/music');
+  await expect(admin.getByRole('img', { name: 'Musikdaten von Spotify' })).toBeVisible();
+  await expect(admin.locator('[title^="Partysong"]').first()).toBeVisible();
 
   for (const path of [
     '/admin',

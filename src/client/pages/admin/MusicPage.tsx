@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { Cover, MoodBadge } from '../../components/music.tsx';
+import { Cover, MoodBadge, SpotifyLogo } from '../../components/music.tsx';
 import { Badge, Button, Card, Empty, Field, Input, Notice, Select, Spinner } from '../../components/ui.tsx';
 import { api } from '../../lib/api.ts';
 import { berlinParts, formatDateTime, formatDayTime, formatTime, fromBerlin } from '../../lib/time.ts';
@@ -62,6 +62,7 @@ export function MusicPage() {
       <PageTitle
         title="Musik & Sets"
         subtitle="Songs auswählen, Stimmungslevel pflegen und festlegen, was wann zur Wahl steht."
+        actions={<SpotifyLogo />}
       />
       <div className="flex flex-wrap gap-2">
         {tabs.map((t) => (
@@ -141,10 +142,10 @@ function Library({ sets }: { sets: SetRow[] }) {
             >
               <Cover src={song.image_url} size={44} />
               <div className="min-w-[12rem] flex-1">
-                <div className="truncate font-semibold">
+                <div title={song.title} className="truncate font-semibold">
                   {song.title} {song.explicit ? <Badge tone="warning">E</Badge> : null}
                 </div>
-                <div className="truncate text-sm text-muted">
+                <div title={song.artist} className="truncate text-sm text-muted">
                   {song.artist} · {song.set_ids.map((id) => setById.get(id)?.name ?? `#${id}`).join(', ') || 'kein Set'}
                   {song.playback_status ? ` · ${song.playback_status}` : ''}
                 </div>
@@ -309,8 +310,12 @@ function AddSongs({ sets, onChange }: { sets: SetRow[]; onChange: () => Promise<
             <li key={track.uri} className="flex items-center gap-3 rounded-xl bg-raised/50 p-2">
               <Cover src={track.imageUrl} size={40} />
               <div className="min-w-0 flex-1">
-                <div className="truncate font-semibold">{track.title}</div>
-                <div className="truncate text-sm text-muted">{track.artist}</div>
+                <div title={track.title} className="truncate font-semibold">
+                  {track.title}
+                </div>
+                <div title={track.artist} className="truncate text-sm text-muted">
+                  {track.artist}
+                </div>
               </div>
               {track.known ? <Badge tone="success">in Bibliothek</Badge> : null}
               <Button size="sm" disabled={progress !== null} onClick={() => void importReference(track.uri)}>

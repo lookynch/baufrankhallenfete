@@ -1,4 +1,4 @@
-import { Cover, MoodBadge, QrCode } from '../../components/music.tsx';
+import { Cover, MoodBadge, QrCode, SpotifyLogo } from '../../components/music.tsx';
 import { useI18n } from '../../lib/i18n.tsx';
 import { theme } from '../../lib/theme.ts';
 import { formatDuration, formatTime, useNow } from '../../lib/time.ts';
@@ -68,13 +68,15 @@ function NowPlayingPanel({
 }) {
   const { t } = useI18n();
   const progress = useProgress(nowPlaying, now);
+  const logo = <SpotifyLogo size={compact ? 28 : 36} className="self-start" />;
   if (!nowPlaying) {
     return (
       <div className="flex items-center gap-6">
         <Cover src={null} size={compact ? 120 : 220} large />
-        <div className={`font-display font-bold text-muted ${compact ? 'text-3xl' : 'text-5xl'}`}>
+        <div className={`flex-1 font-display font-bold text-muted ${compact ? 'text-3xl' : 'text-5xl'}`}>
           {t('tv.noMusic')}
         </div>
+        {logo}
       </div>
     );
   }
@@ -82,10 +84,15 @@ function NowPlayingPanel({
     <div className="flex items-center gap-6">
       <Cover src={nowPlaying.imageUrl} size={compact ? 120 : 220} large className="shadow-2xl" />
       <div className="min-w-0 flex-1">
-        <div className={`font-display leading-tight font-bold ${compact ? 'text-3xl' : 'text-5xl'} line-clamp-2`}>
+        <div
+          title={nowPlaying.title}
+          className={`font-display leading-tight font-bold ${compact ? 'text-3xl' : 'text-5xl'} line-clamp-2`}
+        >
           {nowPlaying.title}
         </div>
-        <div className={`mt-2 truncate text-muted ${compact ? 'text-xl' : 'text-3xl'}`}>{nowPlaying.artist}</div>
+        <div title={nowPlaying.artist} className={`mt-2 truncate text-muted ${compact ? 'text-xl' : 'text-3xl'}`}>
+          {nowPlaying.artist}
+        </div>
         <div className="mt-5 h-2.5 overflow-hidden rounded-full bg-raised">
           <div
             className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-[width] duration-1000 ease-linear"
@@ -97,6 +104,7 @@ function NowPlayingPanel({
           <span>{formatDuration(nowPlaying.durationMs)}</span>
         </div>
       </div>
+      {logo}
     </div>
   );
 }
@@ -141,8 +149,12 @@ export function TvScreen({ state, offsetMs }: { state: MusicState; offsetMs: num
               <li key={song.id} className="flex items-center gap-4">
                 <Cover src={song.imageUrl} size={64} large />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-2xl font-semibold">{song.title}</div>
-                  <div className="truncate text-lg text-muted">{song.artist}</div>
+                  <div title={song.title} className="truncate text-2xl font-semibold">
+                    {song.title}
+                  </div>
+                  <div title={song.artist} className="truncate text-lg text-muted">
+                    {song.artist}
+                  </div>
                 </div>
                 <MoodBadge level={song.level} />
                 <span className="w-20 text-right text-xl text-muted tabular-nums">
@@ -188,11 +200,13 @@ export function TvScreen({ state, offsetMs }: { state: MusicState; offsetMs: num
                     <div className="relative flex items-center gap-3 px-3 py-2">
                       <Cover src={c.imageUrl} size={44} large />
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-xl font-semibold">
+                        <div title={c.title} className="truncate text-xl font-semibold">
                           {c.wishKey ? <span className="mr-2 font-mono text-base text-accent">{c.wishKey}</span> : null}
                           {c.title}
                         </div>
-                        <div className="truncate text-base text-muted">{c.artist}</div>
+                        <div title={c.artist} className="truncate text-base text-muted">
+                          {c.artist}
+                        </div>
                       </div>
                       <span className="font-display text-3xl font-bold tabular-nums">{c.votes ?? 0}</span>
                     </div>
@@ -252,8 +266,12 @@ export function PlayerTicker({ state, offsetMs }: { state: MusicState; offsetMs:
           <span className="text-lg font-semibold text-muted">{t('player.next')}</span>
           <Cover src={next.imageUrl} size={56} large />
           <div className="min-w-0">
-            <div className="truncate text-xl font-semibold">{next.title}</div>
-            <div className="truncate text-muted">{next.artist}</div>
+            <div title={next.title} className="truncate text-xl font-semibold">
+              {next.title}
+            </div>
+            <div title={next.artist} className="truncate text-muted">
+              {next.artist}
+            </div>
           </div>
         </div>
       ) : null}

@@ -423,7 +423,7 @@ describe('Cover-Proxy', () => {
 });
 
 describe('Budget-Wächter für Gast-Cover', () => {
-  it('blendet Cover in Zustand, Wünschen und Suche ab 80 % aus', async () => {
+  it('blendet Cover in Zustand, Wünschen und Suche ab 80 % aus, Spotify-Links bleiben', async () => {
     const h = new Harness();
     const db = h.env.DB;
     const cover = (i: number) => `https://i.scdn.co/image/ab67616d0000b273${String(i).padStart(24, '0')}`;
@@ -479,6 +479,18 @@ describe('Budget-Wächter für Gast-Cover', () => {
     const throttled = await guestCovers(0.85);
     expect(throttled).toHaveLength(normal.length);
     expect(throttled.every((url) => url === null)).toBe(true);
+
+    const state = await guest.request('GET', '/api/public/state');
+    const wishes = await guest.request('GET', '/api/public/wishes');
+    const uris = [
+      (state.json.nowPlaying as { uri: string }).uri,
+      ...(state.json.round as { candidates: Array<{ uri: string }> }).candidates.map((c) => c.uri),
+      ...(wishes.json.wishes as Array<{ uri: string }>).map((w) => w.uri),
+    ];
+    expect(uris.length).toBeGreaterThan(10);
+    expect(uris.every((uri) => /^spotify:track:[A-Za-z0-9]+$/.test(uri))).toBe(true);
+    expect(uris).toContain(wish.uri);
+    expect(uris[0]).toBe(makeTrack(0).uri);
   });
 });
 

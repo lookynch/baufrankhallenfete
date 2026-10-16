@@ -121,7 +121,9 @@ publicRoutes.get('/state', async (c) => {
         ? { ...view, candidates: view.candidates.map((candidate) => ({ ...candidate, imageUrl: null })) }
         : view,
     myVote: round ? await myVote(c.env.DB, round.id, decoded.deviceId) : null,
-    nowPlaying: track ? { title: track.title, artist: track.artist, imageUrl: covers ? track.imageUrl : null } : null,
+    nowPlaying: track
+      ? { uri: track.uri, title: track.title, artist: track.artist, imageUrl: covers ? track.imageUrl : null }
+      : null,
     pollAfterMs: guestPollAfterMs(settings, view, now, budget),
   });
 });

@@ -1,7 +1,58 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { coverPath } from '../../shared/spotify.ts';
+import { coverPath, spotifyTrackUrl } from '../../shared/spotify.ts';
 import { useI18n, type MessageKey } from '../lib/i18n.tsx';
+import { spotifyIcon, spotifyLogo } from './spotify-brand.ts';
+
+function BrandMark({
+  mark,
+  size,
+  label,
+  className = '',
+}: {
+  mark: typeof spotifyLogo;
+  size: number;
+  label?: string;
+  className?: string;
+}) {
+  return (
+    <svg
+      viewBox={mark.viewBox}
+      fill="currentColor"
+      role={label ? 'img' : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+      className={`w-auto shrink-0 text-white ${className}`}
+      style={{ height: size }}
+    >
+      {mark.paths.map((d) => (
+        <path key={d} d={d} />
+      ))}
+    </svg>
+  );
+}
+
+export function SpotifyLogo({ size = 24, className = '' }: { size?: number; className?: string }) {
+  const { t } = useI18n();
+  return <BrandMark mark={spotifyLogo} size={size} label={t('spotify.attribution')} className={className} />;
+}
+
+export function SpotifyLink({ uri }: { uri: string }) {
+  const { t } = useI18n();
+  const href = spotifyTrackUrl(uri);
+  if (!href) return null;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={t('spotify.open')}
+      className="shrink-0 rounded-full p-1.5 transition hover:bg-raised"
+    >
+      <BrandMark mark={spotifyIcon} size={24} />
+    </a>
+  );
+}
 
 export function Cover({
   src,
