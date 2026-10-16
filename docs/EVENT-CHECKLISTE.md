@@ -2,8 +2,15 @@
 
 ## 4 Wochen vorher
 
-- [ ] Rechtsfragen geklärt: Spotify-Nutzung im Firmenkontext, GEMA (Rechtsabteilung).
-- [ ] Datenschutzhinweis und Betriebsrat informiert.
+- [ ] Kalendereinträge für **Fete −7 Tage**, **+8 Tage** und **+91 Tage** angelegt (Abschnitte unten).
+- [ ] Musikrechte mit dem Ausrichter geklärt (organisatorisch, nicht Teil der App):
+  - GEMA: Betriebsfeiern gelten regelmäßig als öffentliche Wiedergabe, Anmeldung vor dem Event.
+  - Spotify: Developer Terms und Nutzungsbedingungen erlauben nur private, nicht-kommerzielle Nutzung, die Developer Policy untersagt Produkte für Unternehmen.
+- [ ] Datenschutz (Betreiber ist privat, Details in [`DATENSCHUTZ.md`](DATENSCHUTZ.md)):
+  - `/datenschutz` und `/impressum` gegengelesen, Stand-Datum `updatedAt` in `src/shared/legal.ts` aktuell.
+  - Rolle der GmbH geklärt. Nutzt sie die App mit (z. B. die Buchhaltung das Verbrauchsprotokoll) oder gibt sie Weisungen, kann sie mitverantwortlich sein. Dann auch ihren Datenschutzbeauftragten und gegebenenfalls den Betriebsrat einbinden.
+  - Offene Prüfungen aus `DATENSCHUTZ.md` erledigt (D1-Standort, Cloudflare-Plan, DPF-Eintrag, Inhaber des Party-Accounts).
+- [ ] `CF_ANALYTICS_TOKEN` gesetzt (dringend empfohlen). Ohne ihn drosselt der Budget-Wächter nicht, und Gäste sehen Cover auch über 80 % Budget.
 - [ ] Spotify-Premium des Party-Accounts läuft über das Eventdatum hinaus.
 - [ ] Spotify im Admin unter „Musik & Sets → Spotify“ **neu verbinden**: Die Freigabe gilt 6 Monate ab Verbindung.
 - [ ] Mindestens 2 Owner mit 2FA. Wiederherstellungscodes sicher abgelegt.
@@ -25,6 +32,14 @@
 - [ ] Im Dashboard die Zahl „Requests heute“ mit dem Cloudflare-Dashboard abgeglichen.
 - [ ] PBKDF2-Login-Zeit mit `wrangler pages deployment tail` geprüft (CPU unter 10 ms, Standard 20.000 Iterationen, max. 30.000).
 - [ ] Admins mit Passwort aus älteren Versionen (50.000 Iterationen) per Einladung mit Reset neu eingeladen.
+- [ ] Bei eigener Domain: In der Cloudflare-Zone Web Analytics, Bot Fight Mode, JavaScript Detections und Email Obfuscation ausgeschaltet. Sie können Skripte unter `/cdn-cgi/` einbinden, die die CSP als eigene Domain erlaubt.
+- [ ] Gastseite in den Browser-DevTools geprüft: Im Netzwerk-Tab nur Requests an die eigene Domain, auch keine unter `/cdn-cgi/` (Filter `/cdn-cgi/`). Gespeichert ist nur `__Host-fete`, nach Sprachwahl zusätzlich `lang`.
+
+## Fete −7 Tage
+
+- [ ] Workflow „Datenlöschung“ unter _Actions_ aktiv. GitHub deaktiviert Schedules in öffentlichen Repos nach 60 Tagen ohne Aktivität im Repo, dann „Enable workflow“.
+- [ ] Workflow mit „Run workflow“ gestartet, Lauf grün. Das Dashboard zeigt keine Warnung „Automatische Löschung …“.
+- [ ] Keine offenen Issues „Datenlöschung fehlgeschlagen“.
 
 ## Musik
 
@@ -44,7 +59,9 @@
   - Buzzer-PC online
   - TV online
   - Sets grün
-  - Turnstile und Access konfiguriert (ohne Turnstile gelten alle Gäste als verifiziert)
+  - Budget-Wächter aktiv
+  - Automatische Löschung aktuell
+- [ ] Cloudflare Access eingerichtet (sonst Hinweis im Dashboard).
 - [ ] Buzzer-Agent läuft. Ein Testdruck erscheint unter „Buzzer“ und wird gleich wieder storniert.
 
 ## Während des Abends
@@ -68,7 +85,19 @@
 
 ## Danach
 
-- [ ] Verbrauchsprotokoll (CSV) an die Buchhaltung.
-- [ ] „Eventdaten bereinigen“ (Owner) ausführen.
+- [ ] Verbrauchsprotokoll (CSV) an die Buchhaltung, bevor Admin-Konten gelöscht werden. Sonst ist „Erfasst von“ für deren Buchungen leer.
+- [ ] Gästedaten werden 7 Tage nach der letzten Aktivität automatisch gelöscht. Optional sofort mit „Eventdaten bereinigen“ (Owner).
 - [ ] `BOOTSTRAP_TOKEN` in GitHub löschen und Deploy erneut ausführen (entfernt ihn auch aus Pages).
-- [ ] Nicht mehr benötigte Admins deaktivieren (offene Einladungen werden dabei widerrufen).
+- [ ] Nicht mehr benötigte Admins deaktivieren (offene Einladungen werden dabei widerrufen). Deaktivierte Konten werden 90 Tage nach der letzten Anmeldung automatisch gelöscht.
+- [ ] Spotify im Admin trennen, wenn keine weitere Fete ansteht.
+- [ ] Optional `IP_HASH_SECRET` in GitHub durch einen neuen Zufallswert ersetzen und den Deploy erneut ausführen. Alte Netz-Schlüssel lassen sich dann keiner IP-Adresse mehr zuordnen.
+
+## Fete +8 Tage
+
+- [ ] Dashboard „Gäste & Sicherheit“ zeigt 0 Geräte und 0 Stimmen.
+- [ ] Workflow „Datenlöschung“ läuft weiter täglich grün.
+
+## Fete +91 Tage
+
+- [ ] Workflow „Datenlöschung“ noch aktiv. Ohne Aktivität im Repo hat GitHub ihn nach 60 Tagen deaktiviert: „Enable workflow“, dann „Run workflow“.
+- [ ] Unter „Audit & Sicherheit“ ist der älteste Eintrag (mit „Ältere laden“ bis zum Ende) höchstens 91 Tage alt: 90 Tage Frist plus ein Tag Laufintervall.

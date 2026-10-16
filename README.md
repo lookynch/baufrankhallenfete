@@ -21,12 +21,11 @@ Party-App für die Fete in der Baufrankhalle (IT Applications & Buchhaltung). L�
 
 ## Betrugsschutz für Gäste (ohne Zusatzaufwand)
 
-Gäste scannen nur den QR-Code. Unsichtbar geprüft werden:
+Gäste scannen nur den QR-Code. Geprüft wird ohne Drittanbieter, ohne Bot-Challenge und ohne Gerätesignatur:
 
-- **Rotierender QR-Token** (60 s) als Anwesenheitsnachweis. Er setzt ein signiertes Geräte-Cookie für den ganzen Abend.
-- **Cloudflare Turnstile** im Invisible-Modus. Ohne `TURNSTILE_SITE_KEY`/`TURNSTILE_SECRET` gelten alle Gäste als verifiziert, das Dashboard warnt dann.
-- **IP-Limit pro Runde:** IPv6 pro /64-Netz (Standard 1) und zusätzlich pro /48-Netz (`votesPerNetV6`, Standard 5), IPv4 Standard 3, weil Mobilfunk-CGNAT und iCloud Private Relay Adressen teilen. Unverifizierte Geräte zählen immer streng (1 pro IP).
-- **Rate-Limits**, Gerätesignatur als Indiz und auffällige Netze im Admin sichtbar.
+- **Rotierender QR-Token** (60 s) als Anwesenheitsnachweis. Er setzt ein signiertes Geräte-Cookie, das höchstens 24 h gilt. Erneutes Scannen verlängert es nicht.
+- **IP-Limit pro Runde:** IPv6 pro /64-Netz (Standard 1) und zusätzlich pro /48-Netz (`votesPerNetV6`, Standard 5), IPv4 Standard 3, weil Mobilfunk-CGNAT und iCloud Private Relay Adressen teilen. Gespeichert wird nur ein pseudonymisierter Netz-Schlüssel (HMAC), nie die IP-Adresse.
+- **Rate-Limits** und auffällige Netze (Geräte pro Netz-Schlüssel) im Admin sichtbar.
 
 Restrisiko: Wer gezielt Browser oder Gerät wechselt _und_ sich neu ins Mobilfunknetz einwählt, kann mehrfach abstimmen. Ohne Login ist das nicht vollständig verhinderbar.
 
@@ -34,21 +33,52 @@ Restrisiko: Wer gezielt Browser oder Gerät wechselt _und_ sich neu ins Mobilfun
 
 - Eigener Account pro Admin, Einladung per Einmal-Link (24 h). Eine neue Einladung ersetzt ältere offene Einladungen desselben Benutzers. Bestehende Benutzer werden nur mit ausdrücklichem **Reset** neu eingeladen. Offene Einladungen lassen sich widerrufen, Deaktivieren widerruft sie automatisch. Deaktivierte Accounts werden durch eine Einladung nicht reaktiviert, der letzte aktive Owner kann nicht herabgestuft werden.
 - Passwort (PBKDF2 + geheimer Pepper) und **Pflicht-TOTP**, dazu 10 Wiederherstellungscodes.
-- Sessions als `__Host-` Cookies mit SameSite=Strict, Idle 2 h, maximal 12 h. CSRF-Schutz über Origin-Prüfung und Pflicht-Header.
+- Sessions als `__Host-` Cookies mit SameSite=Strict, Idle 2 h, maximal 12 h, ohne gespeicherte IP oder Browserkennung. CSRF-Schutz über Origin-Prüfung und Pflicht-Header.
 - Kritische Aktionen (Admins verwalten, Gästedaten löschen) brauchen eine **erneute 2FA-Bestätigung**.
 - Rollen `owner` (verwaltet Admins) und `admin`.
-- Login-Drosselung pro Benutzer + IP, damit Gäste niemanden aussperren können.
-- Lückenloses **Audit-Log** aller Änderungen.
+- Login-Drosselung pro IP, pro IPv6-/48-Netz und pro Benutzer + IP (Benutzername nur als HMAC), damit Gäste niemanden aussperren können.
+- **Audit-Log** aller Änderungen (90 Tage).
 - Optional zusätzlich **Cloudflare Access** (siehe unten). Wenn `ACCESS_TEAM_DOMAIN` und `ACCESS_AUD` gesetzt sind, prüft die App das Access-JWT selbst, sonst warnt das Dashboard.
 - Strikte CSP ohne Inline-Skripte und HSTS. Displays sind nur nach Kopplung durch einen Admin nutzbar, Buzzer-Requests sind HMAC-signiert und gegen Wiederholung geschützt.
 
+## Datenschutz und Löschfristen
+
+Die App wird privat betrieben. Verantwortlicher, Aufsichtsbehörde und Fristen stehen im Code nur in [`src/shared/legal.ts`](src/shared/legal.ts). Daraus entstehen `/datenschutz` (mit Abschnitt `#admin`) und `/impressum`, statisch auf Deutsch und Englisch. Interne Dokumentation mit Verzeichnis der Verarbeitungstätigkeiten, TOM, Interessenabwägung, Löschkonzept und Datenpannen: [`docs/DATENSCHUTZ.md`](docs/DATENSCHUTZ.md). Ändern sich Fristen oder Stammdaten, diese Datei und die [Event-Checkliste](docs/EVENT-CHECKLISTE.md) mitziehen.
+
+- Gast-Browser laden nur von der eigenen Domain: keine Skripte, Schriften oder Bilder von Drittanbietern, Cover über den Proxy `/api/cover/<id>`. Deshalb gibt es kein Consent-Banner.
+- Gespeichert werden Geräte-ID, ein pseudonymisierter Netz-Schlüssel (HMAC der IP-Adresse, rechtlich weiter personenbezogen), Stimmen und Wünsche.
+- Gästedaten werden 7 Tage nach der letzten Aktivität automatisch gelöscht bzw. anonymisiert, Suchcache und Rate-Limits nach 24 h, das Audit-Log nach 90 Tagen. Gäste löschen die Daten ihres Geräts in der App sofort, Owner alle Gästedaten unter „Eventdaten bereinigen“.
+
+### Workflow „Datenlöschung“
+
+[`.github/workflows/retention.yml`](.github/workflows/retention.yml) läuft täglich um 04:23 UTC und lässt sich manuell starten. `scripts/retention-sql.ts` erzeugt die Statements aus `src/server/services/retention.ts`, dieselbe Liste wie beim Admin-Button. `wrangler d1 execute --remote --command` führt sie auf der Produktions-D1 aus. Der Workflow nutzt `CLOUDFLARE_API_TOKEN` und `CLOUDFLARE_ACCOUNT_ID` aus dem Environment `production` und hat die eigene Concurrency-Gruppe `retention`, blockiert also keinen Deploy.
+
+- **Nachweis:** Das letzte Statement setzt `retention_run` in `kv`, danach prüft der Workflow, ob der Zeitstempel frisch ist. Das Dashboard warnt, wenn der letzte Lauf über 48 h zurückliegt. „Eventdaten bereinigen“ setzt den Nachweis ebenfalls.
+- **Fehler:** Der Workflow legt ein Issue „Datenlöschung fehlgeschlagen (Datum)“ an. Der Lauf ist idempotent, der nächste Tag holt nach.
+- **60-Tage-Regel:** GitHub deaktiviert Schedules in öffentlichen Repos nach 60 Tagen ohne Aktivität im Repo. Dann gibt es weder Lauf noch Issue. Unter _Actions → Datenlöschung_ wieder aktivieren und manuell starten. Die Termine dafür stehen in der Event-Checkliste.
+- Nach dem ersten Merge einmal manuell starten. Abschalten: Workflow in Actions deaktivieren. Fehllöschungen über D1 Time Travel zurückholen.
+
 ## Kosten / Free-Tier
 
-Pro Tag sind 100.000 Function-Requests frei. Für 6 h, 150 Gäste und etwa 18 Runden kommt die Planung im schlechtesten Fall auf rund 25.000 Requests.
+Pro Tag sind 100.000 Function-Requests frei (Reset 00:00 UTC). Schätzung für 6 h, 150 Gäste und etwa 18 Runden:
 
-- **Statische Dateien zählen nicht** (`_routes.json` aktiviert Functions nur für `/api/*`).
+| Posten                                      | Schlechtester Fall | Realistisch    |
+| ------------------------------------------- | ------------------ | -------------- |
+| Join, Abstimmen, Rundenwechsel, Displays    | ca. 25.000         | ca. 25.000     |
+| Cover der Kandidaten (150 × 18 Runden × 12) | 32.400             | 11.000         |
+| Cover „Läuft gerade“ (150 × 18)             | 2.700              | 1.000          |
+| Cover Wunschliste (150 × 60)                | 9.000              | 2.300          |
+| Cover Suche (150 × ca. 120)                 | 18.000             | 2.000          |
+| Cover TV, Player, Admin                     | 3.000              | 1.500          |
+| **Summe ohne Budget-Wächter**               | **ca. 90.000**     | **ca. 43.000** |
+
+- **Statische Dateien zählen nicht** (`_routes.json` aktiviert Functions nur für `/api/*`), auch nicht `/datenschutz` und `/impressum`. Der Löschlauf nutzt die D1-API und kostet ebenfalls keinen Function-Request.
+- Jedes Cover ist ein Function-Request, der Browser hält es 24 h im Cache.
 - Gäste fragen nicht dauerhaft ab, nur beim Laden, beim Abstimmen und beim Rundenwechsel (mit Zufallsverzögerung).
-- Der **Budget-Wächter** im Dashboard zeigt den echten Verbrauch (optional `CF_ANALYTICS_TOKEN`). Ab 60 % werden Gäste und Bar-Screens automatisch gedrosselt; TV, Player-Tab und Buzzer-PC (die Taktgeber) nie.
+- Der **Budget-Wächter** im Dashboard zeigt den echten Verbrauch. Er braucht `CF_ANALYTICS_TOKEN` (dringend empfohlen). Ohne Token warnt das Dashboard „Budget-Wächter inaktiv“, der Deploy läuft trotzdem.
+  - Ab 60 % fragen Gäste und Bar-Screens nur halb so oft ab.
+  - Ab 80 % nur noch ein Viertel so oft, und Gäste sehen keine Cover mehr (Status, Suche, Wünsche). Damit bleibt auch der schlechteste Fall unter 100.000.
+  - TV, Player-Tab und Buzzer-PC (die Taktgeber) werden nie gedrosselt.
 - Welche Analytics-Datensätze Pages-Functions-Aufrufe enthalten, ist nicht abschließend geprüft. Die App fragt `workersInvocationsAdaptive` und `pagesFunctionsInvocationsAdaptiveGroups` ab und nimmt den größeren Wert. Vor dem Event mit dem Cloudflare-Dashboard abgleichen.
 
 ## Änderungen machen (ohne Cloudflare-Zugang)
@@ -56,7 +86,7 @@ Pro Tag sind 100.000 Function-Requests frei. Für 6 h, 150 Gäste und etwa 18 Ru
 1. Branch anlegen, ändern, Pull Request öffnen. Die **CI** prüft Audit, Lint, Format, Theme-Regel, Typen, Unit-/Integrationstests mit Coverage, Build, Migrationen auf frischer D1, Smoke-Test gegen `wrangler pages dev`, Playwright-E2E (inkl. CSP-Verstößen) und den PC-Agenten.
 2. Nach Review in `main` mergen. **`deploy.yml`** führt die CI erneut aus, wendet D1-Migrationen an, synchronisiert die Secrets, deployt und macht einen Health-Check auf Produktion.
 
-Migrationen nur **additiv** schreiben (neue Datei `migrations/000N_*.sql`). Der laufende Code muss mit dem neuen Schema funktionieren. `/api/health` meldet die Schema-Version (aktuell 2).
+Migrationen nur **additiv** schreiben (neue Datei `migrations/000N_*.sql`). Der laufende Code muss mit dem neuen Schema funktionieren. `/api/health` meldet die Schema-Version (aktuell 3).
 
 ### Design an den Einladungsflyer anpassen
 
@@ -80,36 +110,35 @@ PW_CHROMIUM_PATH=/pfad/zu/chrome npm run test:e2e
    - legt die D1-Datenbank an und trägt die ID in `wrangler.toml` ein,
    - legt das Pages-Projekt an,
    - setzt die Basis-Secrets im GitHub-Environment `production` (falls `gh` angemeldet ist). Vorhandene Secrets bleiben unverändert, das Script ist wiederholbar.
-2. **Cloudflare API-Token** anlegen: Rechte _Account → Cloudflare Pages → Edit_ und _Account → D1 → Edit_, nur dieses Konto, mit Ablaufdatum. In GitHub als Environment-Secrets `CLOUDFLARE_API_TOKEN` und `CLOUDFLARE_ACCOUNT_ID` hinterlegen.
+2. **Cloudflare API-Token** anlegen: Rechte _Account → Cloudflare Pages → Edit_ und _Account → D1 → Edit_, nur dieses Konto, mit Ablaufdatum. In GitHub als Environment-Secrets `CLOUDFLARE_API_TOKEN` und `CLOUDFLARE_ACCOUNT_ID` hinterlegen. Deploy und Workflow „Datenlöschung“ nutzen beide diesen Token. Ein eigener Token nur für D1 ist als Option in [`docs/DATENSCHUTZ.md`](docs/DATENSCHUTZ.md) beschrieben.
 3. **Spotify-App** auf developer.spotify.com mit dem **Premium-Party-Account** anlegen:
    - Redirect-URI: `https://<projekt>.pages.dev/admin/spotify/callback`
    - Secrets `SPOTIFY_CLIENT_ID` und `SPOTIFY_CLIENT_SECRET`
-4. **Turnstile-Widget** im Modus _Invisible_ für die Domain anlegen → `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET`. Ohne Turnstile gelten Gäste als verifiziert (Dashboard-Warnung).
-5. **Cloudflare Access** (Zero Trust, gratis bis 50 Nutzer) einrichten:
+4. **Cloudflare Access** (Zero Trust, gratis bis 50 Nutzer) einrichten:
    - Anwendung für `<projekt>.pages.dev/admin`, `/api/admin` **und** `*.<projekt>.pages.dev` (Deployment-URLs)
    - Optional `ACCESS_TEAM_DOMAIN` (z. B. `team.cloudflareaccess.com`) und `ACCESS_AUD` setzen, dann prüft die App das Token zusätzlich.
-6. Optional ein Analytics-Token (_Account Analytics: Read_) → `CF_ANALYTICS_TOKEN`.
-7. **Branch-Protection** für `main` aktivieren:
+5. **Analytics-Token** (_Account Analytics: Read_) → `CF_ANALYTICS_TOKEN`. Dringend empfohlen, ohne ihn arbeitet der Budget-Wächter nicht.
+6. **Branch-Protection** für `main` aktivieren:
    - PR, 1 Review und grüne CI-Checks Pflicht, kein Force-Push
    - CODEOWNERS prüfen
-8. `wrangler.toml` committen und mergen, der Deploy läuft automatisch.
-9. Ersten Owner anlegen: `/admin/bootstrap` öffnen, den `BOOTSTRAP_TOKEN` eingeben, den Einladungslink öffnen und Passwort + 2FA einrichten. Danach weitere Admins einladen, mindestens **2 Owner**. Anschließend `BOOTSTRAP_TOKEN` in GitHub löschen und den Deploy erneut ausführen. Der Deploy entfernt optionale Secrets, die in GitHub leer sind oder fehlen, auch aus Pages.
+7. `wrangler.toml` committen und mergen, der Deploy läuft automatisch. Danach den Workflow „Datenlöschung“ unter _Actions_ einmal manuell starten und prüfen, dass er grün ist.
+8. Ersten Owner anlegen: `/admin/bootstrap` öffnen, den `BOOTSTRAP_TOKEN` eingeben, den Einladungslink öffnen und Passwort + 2FA einrichten. Danach weitere Admins einladen, mindestens **2 Owner**. Anschließend `BOOTSTRAP_TOKEN` in GitHub löschen und den Deploy erneut ausführen. Der Deploy entfernt optionale Secrets, die in GitHub leer sind oder fehlen, auch aus Pages.
 
 **Wichtig:** `SESSION_PEPPER` und `ENC_KEY` nie ändern. Sonst sind alle Passwörter, 2FA-Geheimnisse und die Spotify-Verbindung ungültig, und alle Admins müssen neu eingeladen werden.
 
 ### Secrets (GitHub-Environment `production`)
 
-| Name                                                                        | Pflicht                 | Zweck                                                       |
-| --------------------------------------------------------------------------- | ----------------------- | ----------------------------------------------------------- |
-| `SESSION_PEPPER`, `COOKIE_SECRET`, `QR_SECRET`, `IP_HASH_SECRET`, `ENC_KEY` | ja                      | Kryptografie (je ≥ 32 Zufallszeichen)                       |
-| `BUZZER_HMAC_SECRET`                                                        | ja                      | Gleicher Wert in `agent/config.toml`                        |
-| `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`                                | für Musik               | Spotify-App                                                 |
-| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET`                                    | empfohlen               | Bot-Schutz (ohne: Gäste gelten als verifiziert)             |
-| `BOOTSTRAP_TOKEN`                                                           | nur für Ersteinrichtung | Erster Owner                                                |
-| `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`                                          | optional                | Access-JWT-Prüfung                                          |
-| `CF_ANALYTICS_TOKEN`                                                        | optional                | Budget-Wächter                                              |
-| Variable `PBKDF2_ITERATIONS`                                                | optional                | Standard 20.000, 10.000–30.000 (CPU-Limit Free-Tier: 10 ms) |
-| Variablen `PAGES_PROJECT`, `PRODUCTION_URL`                                 | optional                | Projektname bzw. eigene Domain                              |
+| Name                                                                        | Pflicht                 | Zweck                                                         |
+| --------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`                             | ja                      | Deploy und Workflow „Datenlöschung“                           |
+| `SESSION_PEPPER`, `COOKIE_SECRET`, `QR_SECRET`, `IP_HASH_SECRET`, `ENC_KEY` | ja                      | Kryptografie (je ≥ 32 Zufallszeichen)                         |
+| `BUZZER_HMAC_SECRET`                                                        | ja                      | Gleicher Wert in `agent/config.toml`                          |
+| `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`                                | für Musik               | Spotify-App                                                   |
+| `CF_ANALYTICS_TOKEN`                                                        | dringend empfohlen      | Budget-Wächter (ohne: keine Drosselung, Cover auch über 80 %) |
+| `BOOTSTRAP_TOKEN`                                                           | nur für Ersteinrichtung | Erster Owner                                                  |
+| `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`                                          | optional                | Access-JWT-Prüfung                                            |
+| Variable `PBKDF2_ITERATIONS`                                                | optional                | Standard 20.000, 10.000–30.000 (CPU-Limit Free-Tier: 10 ms)   |
+| Variablen `PAGES_PROJECT`, `PRODUCTION_URL`                                 | optional                | Projektname bzw. eigene Domain                                |
 
 Eine geänderte `PBKDF2_ITERATIONS` gilt für neue oder zurückgesetzte Passwörter. Beim Login wird nur umgehasht, wenn gespeicherte und neue Iterationszahl zusammen höchstens 30.000 ergeben. Admins mit älterem Hash (z. B. 50.000) per Einladung mit Reset neu einladen.
 
@@ -121,8 +150,8 @@ Eine geänderte `PBKDF2_ITERATIONS` gilt für neue oder zurückgesetzte Passwör
 
 ## Offene Punkte vor dem Event
 
-- **Recht:** Die Spotify Developer Policy untersagt die Wiedergabe „publicly from a business“; eine Betriebsfeier ist eventuell GEMA-pflichtig. Das muss die Rechtsabteilung klären, es ist nicht geprüft.
-- **Datenschutz / Betriebsrat:** Gespeichert werden Geräte-ID, anonymisierter IP-Schlüssel und Stimmen. Nach dem Event im Admin unter „Eventdaten bereinigen“ löschen.
+- **Musikrechte (organisatorisch, nicht Teil der App):** Die Spotify Developer Terms erlauben nur private, persönliche Nutzung, die Developer Policy untersagt Produkte für Unternehmen. Eine Betriebsfeier ist voraussichtlich GEMA-pflichtig. Beides mit dem Ausrichter klären, es ist nicht abschließend geprüft.
+- **Datenschutz:** Gespeichert werden Geräte-ID, pseudonymisierter Netz-Schlüssel und Stimmen; gelöscht wird automatisch. Offen sind die Rolle der GmbH (mögliche Mitverantwortung), der D1-Standort, der Cloudflare-Plan (Time Travel) und der Inhaber des Spotify-Party-Accounts, siehe [`docs/DATENSCHUTZ.md`](docs/DATENSCHUTZ.md).
 - **Buchhaltung:** Kontenrahmen bestätigen (Defaults sind SKR03-artig: 3980 Vorrat, 4140 Aufwand, 1600 Verbindlichkeiten), dazu Durchschnittspreis und Budget.
 
 Ablauf für den Abend: [`docs/EVENT-CHECKLISTE.md`](docs/EVENT-CHECKLISTE.md).
