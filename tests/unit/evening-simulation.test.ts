@@ -6,6 +6,8 @@ import { loadSettings, saveSettings } from '../../src/server/services/settings.t
 import { tick } from '../../src/server/services/tick.ts';
 import { castVote } from '../../src/server/services/votes.ts';
 import type { SpotifyTrack } from '../../src/server/services/spotify-api.ts';
+import { createWish } from '../../src/server/services/wishes.ts';
+import { FakeLastfm } from '../helpers/fake-lastfm.ts';
 import { FakeSpotify, makeTrack } from '../helpers/fake-spotify.ts';
 import { Clock, testEnv, testRuntime } from '../helpers/runtime.ts';
 
@@ -27,6 +29,7 @@ interface Scenario {
   spotifyPause?: { from: number; to: number };
   votesPerRound?: number;
   tvOffline?: boolean;
+  guestWishEveryMinutes?: number;
 }
 
 async function runEvening(scenario: Scenario) {
@@ -34,8 +37,14 @@ async function runEvening(scenario: Scenario) {
   const env = testEnv();
   const db = env.DB;
   const spotify = new FakeSpotify(clock.now);
-  const rt = testRuntime(env, clock, spotify);
+  const lastfm = new FakeLastfm();
+  lastfm.tag('Pop Star', ['pop', 100]);
+  lastfm.tag('Metal Band', ['thrash metal', 100]);
+  const rt = testRuntime(env, clock, spotify, lastfm);
   const random = seededRandom(42);
+  const blockedUris = new Set<string>();
+  const wishUris = new Set<string>();
+  let nextWishAt = T0 + 30 * MINUTE;
 
   await saveSettings(db, 'event', { startsAt: T0, endsAt: T0 + scenario.hours * HOUR }, T0, null);
   await saveSettings(db, 'voting', { startsAt: T0 + 30 * MINUTE }, T0, null);
@@ -87,6 +96,20 @@ async function runEvening(scenario: Scenario) {
     const pause = scenario.spotifyPause;
     if (pause && clock.time >= T0 + pause.from && clock.time < T0 + pause.to) spotify.pause();
     else spotify.resume();
+    if (scenario.guestWishEveryMinutes && clock.time >= nextWishAt) {
+      nextWishAt += scenario.guestWishEveryMinutes * MINUTE;
+      const index = wishUris.size + blockedUris.size;
+      const metal = index % 2 === 1;
+      const track = { ...makeTrack(index, 200_000, 'wish'), artist: metal ? 'Metal Band' : 'Pop Star' };
+      track.artists = [track.artist];
+      spotify.add(track);
+      levelByUri.set(track.uri, 3);
+      (metal ? blockedUris : wishUris).add(track.uri);
+      const settings = await loadSettings(db, clock.time);
+      await createWish(db, { spotify, lastfm, settings }, `guest-${index}`, track.uri, clock.time).catch(
+        (error: Error) => expect(error.message).toBe('not_party_fit'),
+      );
+    }
     await tick(rt, { force: true });
     await rt.settle();
     const round = await openRound(db);
@@ -111,7 +134,7 @@ async function runEvening(scenario: Scenario) {
     }
     clock.advance(scenario.tvOffline ? 20_000 : 5_000);
   }
-  return { db, spotify, levelByUri };
+  return { db, spotify, levelByUri, blockedUris, wishUris };
 }
 
 describe('Abendsimulation', { timeout: 30_000 }, () => {
@@ -142,6 +165,24 @@ describe('Abendsimulation', { timeout: 30_000 }, () => {
 
     const firstVotingRound = rounds[0]!;
     expect(firstVotingRound.opened_at).toBe(T0 + 30 * MINUTE);
+  });
+
+  it('spielt freie Gästewünsche ohne Lücken und nie gesperrte Titel', async () => {
+    const { db, spotify, blockedUris, wishUris, levelByUri } = await runEvening({
+      hours: 6,
+      guestWishEveryMinutes: 10,
+    });
+    const queued = spotify.log.filter((e) => e.source === 'queue');
+    const firstQueued = spotify.log.findIndex((e) => e.source === 'queue');
+    expect(spotify.log.slice(firstQueued).filter((e) => e.source === 'context')).toEqual([]);
+    expect(queued.some((e) => blockedUris.has(e.uri))).toBe(false);
+    const { results } = await db
+      .prepare('SELECT DISTINCT s.spotify_uri FROM round_candidates c JOIN songs s ON s.id = c.song_id')
+      .all<{ spotify_uri: string }>();
+    expect(results.some((r) => blockedUris.has(r.spotify_uri))).toBe(false);
+    expect(results.filter((r) => wishUris.has(r.spotify_uri)).length).toBeGreaterThan(wishUris.size / 2);
+    const levels = queued.map((e) => levelByUri.get(e.uri)!);
+    for (let i = 1; i < levels.length; i++) expect(Math.abs(levels[i]! - levels[i - 1]!)).toBeLessThanOrEqual(2);
   });
 
   it('läuft weiter, wenn nur der Agent alle 20 s tickt', async () => {

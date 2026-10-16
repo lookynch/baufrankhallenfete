@@ -17,8 +17,9 @@ export async function loadSettings(db: D1Database, now: number): Promise<Setting
     try {
       const parsed = settingsSchemas[key].safeParse({ ...settings[key], ...JSON.parse(row.value) });
       if (parsed.success) (settings as Record<SettingsKey, unknown>)[key] = parsed.data;
+      else console.warn(`settings ${key} invalid, using defaults`);
     } catch {
-      continue;
+      console.warn(`settings ${key} unreadable, using defaults`);
     }
   }
   return settings;

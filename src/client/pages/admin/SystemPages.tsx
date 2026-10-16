@@ -200,7 +200,31 @@ type SettingsData = {
   };
   buzzer: { reviewIntervalSeconds: number };
   polling: { tvMs: number; playerMs: number; barMs: number; guestMs: number };
+  wishes: { autoApprove: boolean };
+  filter: { blockedTags: string[] };
 };
+
+function TagListInput({ tags, onChange }: { tags: string[]; onChange: (tags: string[]) => void }) {
+  const parse = (text: string) =>
+    text
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+  const [text, setText] = useState(() => tags.join('\n'));
+  useEffect(() => {
+    setText((current) => (parse(current).join('\n') === tags.join('\n') ? current : tags.join('\n')));
+  }, [tags]);
+  return (
+    <textarea
+      className="min-h-48 w-full rounded-xl bg-bg px-3 py-2 font-mono text-sm text-fg ring-1 ring-line focus:ring-2 focus:ring-accent focus:outline-none"
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value);
+        onChange(parse(e.target.value));
+      }}
+    />
+  );
+}
 
 function DateTimeInput({ value, onChange }: { value: number; onChange: (ms: number) => void }) {
   const parts = berlinParts(value);
@@ -365,6 +389,29 @@ export function SettingsPage() {
                   <DateTimeInput value={v.endsAt} onChange={(endsAt) => set({ endsAt })} />
                 </Field>
               ) : null}
+            </>
+          )}
+        </SettingsCard>
+        <SettingsCard title="Songwünsche" section="wishes" data={data} onSaved={reload}>
+          {(v, set) => (
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={v.autoApprove} onChange={(e) => set({ autoApprove: e.target.checked })} />{' '}
+              Wünsche automatisch freigeben (aus = jeder Wunsch landet unter „In Prüfung“)
+            </label>
+          )}
+        </SettingsCard>
+        <SettingsCard title="Genre-Filter" section="filter" data={data} onSaved={reload}>
+          {(v, set) => (
+            <>
+              <Notice>
+                Ein Begriff pro Zeile. Gesperrt wird ein Song, wenn ein Last.fm-Tag seines Hauptkünstlers mit hohem
+                Gewicht den Begriff als ganzes Wort enthält: „metal“ sperrt „heavy metal“, aber nicht „Metallica“. Beim
+                Speichern werden bereits gewünschte Songs neu geprüft. Songs, die ein Admin selbst in ein Set gelegt
+                hat, sind nie gesperrt.
+              </Notice>
+              <Field label="Gesperrte Genres">
+                <TagListInput tags={v.blockedTags} onChange={(blockedTags) => set({ blockedTags })} />
+              </Field>
             </>
           )}
         </SettingsCard>

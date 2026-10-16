@@ -95,7 +95,7 @@ const checks: Array<[string, () => Promise<boolean>]> = [
   ['Löschfristen-SQL läuft zweimal gegen lokale D1', async () => retentionRuns.every((status) => status === 0)],
   [
     'Health liefert Schema-Version',
-    async () => ((await (await fetch(`${base}/api/health`)).json()) as { schemaVersion: number }).schemaVersion === 4,
+    async () => ((await (await fetch(`${base}/api/health`)).json()) as { schemaVersion: number }).schemaVersion === 5,
   ],
   [
     'Startseite mit CSP aus _headers, ohne Fremdhosts',

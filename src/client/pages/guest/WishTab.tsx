@@ -40,6 +40,7 @@ export function WishTab({
   const [results, setResults] = useState<Track[]>([]);
   const [searching, setSearching] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [hidden, setHidden] = useState(0);
   const [wishes, setWishes] = useState<Wish[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const searchId = useRef(0);
@@ -60,17 +61,19 @@ export function WishTab({
     const trimmed = query.trim();
     if (trimmed.length < 3) {
       setResults([]);
+      setHidden(0);
       return;
     }
     const id = ++searchId.current;
     const timer = window.setTimeout(async () => {
       setSearching(true);
       try {
-        const response = await api.get<{ tracks: Track[]; limited: boolean; unavailable: boolean }>(
+        const response = await api.get<{ tracks: Track[]; hidden: number; limited: boolean; unavailable: boolean }>(
           `/api/public/search?q=${encodeURIComponent(trimmed)}`,
         );
         if (id !== searchId.current) return;
         setResults(response.tracks);
+        setHidden(response.hidden);
         setNotice(
           response.limited ? t('guest.wish.limited') : response.unavailable ? t('guest.wish.unavailable') : null,
         );
@@ -87,10 +90,14 @@ export function WishTab({
   async function wish(track: Track) {
     setBusy(track.uri);
     try {
-      const result = await api.post<{ key: string; merged: boolean }>('/api/public/wishes', { uri: track.uri });
-      toast(result.merged ? t('guest.wish.merged', { key: result.key }) : t('guest.wish.sent', { key: result.key }));
+      const result = await api.post<{ key: string; merged: boolean; status: Wish['status'] }>('/api/public/wishes', {
+        uri: track.uri,
+      });
+      const sent = result.status === 'approved' ? 'guest.wish.sentApproved' : 'guest.wish.sent';
+      toast(t(result.merged ? 'guest.wish.merged' : sent, { key: result.key }));
       setQuery('');
       setResults([]);
+      setHidden(0);
       await loadWishes();
     } catch (e) {
       const key = e instanceof ApiError ? `guest.wish.error.${e.code}` : '';
@@ -141,6 +148,9 @@ export function WishTab({
         ) : null}
       </div>
       {notice ? <Notice tone="warning">{notice}</Notice> : null}
+      {hidden > 0 && !searching ? (
+        <p className="text-sm text-muted">{t('guest.wish.hidden', { count: hidden })}</p>
+      ) : null}
       {results.length ? (
         <ul className="flex flex-col gap-2">
           {results.map((track) => (

@@ -7,6 +7,7 @@ import { activeEntries, computeSchedule, type ScheduledEntry, type StoredSnapsho
 const MINUTE = 60_000;
 const CANDIDATE_BUFFER_MS = 6 * MINUTE;
 const MAX_CANDIDATES = 30;
+const MAX_WISH_APPEARANCES = 3;
 
 export interface RoundRow {
   id: number;
@@ -71,19 +72,20 @@ function neighbourSetIds(sets: SetRow[], set: SetRow): number[] {
 async function poolForSets(db: D1Database, setIds: number[] | null, settings: Settings, excludeRoundId: number | null) {
   const { results } = await db
     .prepare(
-      `SELECT s.id, ss.set_id, s.duration_ms, COALESCE(s.mood_level, st.default_level) AS level,
+      `SELECT s.id, ss.set_id, s.duration_ms, COALESCE(s.mood_level, s.auto_level, st.default_level) AS level,
               w.id AS wish_id, (SELECT COUNT(*) FROM wish_upvotes u WHERE u.wish_id = w.id) AS upvotes
        FROM set_songs ss
        JOIN songs s ON s.id = ss.song_id
        JOIN sets st ON st.id = ss.set_id
        LEFT JOIN wishes w ON w.song_id = s.id AND w.status = 'approved'
        WHERE ${setIds ? `ss.set_id IN (${setIds.map((_, i) => `?${i + 3}`).join(', ')})` : '1 = 1'}
-         AND s.active = 1
+         AND s.active = 1 AND s.blocked_tag IS NULL AND s.vetoed = 0
          AND (?1 = 1 OR s.explicit = 0)
          AND NOT EXISTS (
            SELECT 1 FROM playback p WHERE p.song_id = s.id AND p.status NOT IN ('missed', 'cancelled')
          )
-         AND NOT EXISTS (SELECT 1 FROM round_candidates rc WHERE rc.round_id = ?2 AND rc.song_id = s.id)`,
+         AND NOT EXISTS (SELECT 1 FROM round_candidates rc WHERE rc.round_id = ?2 AND rc.song_id = s.id)
+         AND (w.id IS NULL OR (SELECT COUNT(*) FROM round_candidates rw WHERE rw.wish_id = w.id) < ${MAX_WISH_APPEARANCES})`,
     )
     .bind(settings.voting.allowExplicit ? 1 : 0, excludeRoundId ?? -1, ...(setIds ?? []))
     .all<PoolSong>();
@@ -99,14 +101,27 @@ function shuffle<T>(items: T[]): T[] {
   return out;
 }
 
-export function pickCandidates(pool: PoolSong[], level: number, settings: Settings): PoolSong[] {
-  const atLevel = [...new Map(pool.filter((s) => s.level === level).map((s) => [s.id, s])).values()];
-  const wishes = atLevel.filter((s) => s.wish_id !== null).sort((a, b) => b.upvotes - a.upvotes);
-  const rest = shuffle(atLevel.filter((s) => s.wish_id === null));
+function fitsRound(song: PoolSong, level: number, target: number): boolean {
+  if (song.level === level) return true;
+  if (song.wish_id === null || Math.abs(song.level - level) !== 1) return false;
+  return Math.sign(song.level - level) !== -Math.sign(target - level);
+}
+
+export function pickCandidates(pool: PoolSong[], level: number, settings: Settings, target = level): PoolSong[] {
+  const byId = new Map<number, PoolSong>();
+  for (const song of pool) {
+    if (!fitsRound(song, level, target)) continue;
+    const seen = byId.get(song.id);
+    if (!seen || (seen.level !== level && song.level === level)) byId.set(song.id, song);
+  }
+  const songs = [...byId.values()];
+  const wishes = songs.filter((s) => s.wish_id !== null).sort((a, b) => b.upvotes - a.upvotes);
+  const rest = shuffle(songs.filter((s) => s.wish_id === null));
+  const wishShare = Math.ceil(settings.voting.candidatesPerRound / 2);
   const minMs = settings.voting.minRoundMinutes * MINUTE + CANDIDATE_BUFFER_MS;
   const picked: PoolSong[] = [];
   let total = 0;
-  for (const song of [...wishes, ...rest]) {
+  for (const song of [...wishes.slice(0, wishShare), ...rest, ...wishes.slice(wishShare)]) {
     if (picked.length >= MAX_CANDIDATES) break;
     if (picked.length >= settings.voting.candidatesPerRound && total >= minMs) break;
     picked.push(song);
@@ -161,7 +176,13 @@ export async function draftRound(
     const loose = plansFor(hasSongs);
     const chosen =
       strict.find((p) => !p.plan.constrained) ?? strict[0] ?? loose.find((p) => !p.plan.constrained) ?? loose[0];
-    return chosen && { ...chosen.plan, set, candidates: pickCandidates(chosen.songs, chosen.plan.level, settings) };
+    return (
+      chosen && {
+        ...chosen.plan,
+        set,
+        candidates: pickCandidates(chosen.songs, chosen.plan.level, settings, chosen.plan.target),
+      }
+    );
   };
   const draft = choose([own, near]);
   if (draft) return draft;
@@ -170,7 +191,14 @@ export async function draftRound(
   if (fallback) return fallback;
   const target = targetLevel(input);
   const level = nearestLevel(previousLevel, target, hasSongs(all)) ?? previousLevel;
-  return { level, target, constrained: true, matched: false, set, candidates: pickCandidates(all, level, settings) };
+  return {
+    level,
+    target,
+    constrained: true,
+    matched: false,
+    set,
+    candidates: pickCandidates(all, level, settings, target),
+  };
 }
 
 function uniqueSongs(songs: PoolSong[]): PoolSong[] {
@@ -279,7 +307,7 @@ export async function finalizeRound(
                  FROM votes WHERE round_id = ?1 AND invalidated = 0 GROUP BY song_id
                ) v ON v.song_id = c.song_id
                LEFT JOIN (SELECT wish_id, COUNT(*) AS cnt FROM wish_upvotes GROUP BY wish_id) u ON u.wish_id = c.wish_id
-               WHERE c.round_id = ?1 AND s.active = 1
+               WHERE c.round_id = ?1 AND s.active = 1 AND s.blocked_tag IS NULL AND s.vetoed = 0
                  AND NOT EXISTS (
                    SELECT 1 FROM playback p WHERE p.song_id = c.song_id AND p.status NOT IN ('missed', 'cancelled')
                  )

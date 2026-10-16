@@ -2,6 +2,7 @@ export interface SpotifyTrack {
   uri: string;
   title: string;
   artist: string;
+  artists: string[];
   album: string | null;
   imageUrl: string | null;
   durationMs: number;
@@ -104,15 +105,14 @@ interface RawTrack {
 
 export function mapTrack(raw: RawTrack | null | undefined): SpotifyTrack | null {
   if (!raw?.uri || !raw.uri.startsWith('spotify:track:') || raw.is_local || !raw.name || !raw.duration_ms) return null;
+  const artists = (raw.artists ?? []).map((a) => a.name).filter((name): name is string => Boolean(name));
   const images = [...(raw.album?.images ?? [])].filter((i) => i.url).sort((a, b) => (a.width ?? 0) - (b.width ?? 0));
   const image = images.find((i) => (i.width ?? 0) >= 250) ?? images[images.length - 1];
   return {
     uri: raw.uri,
     title: raw.name,
-    artist: (raw.artists ?? [])
-      .map((a) => a.name)
-      .filter(Boolean)
-      .join(', '),
+    artist: artists.join(', '),
+    artists,
     album: raw.album?.name ?? null,
     imageUrl: image?.url ?? null,
     durationMs: raw.duration_ms,

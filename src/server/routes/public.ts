@@ -165,11 +165,15 @@ publicRoutes.get('/search', async (c) => {
   const guest = await requireGuest(c);
   await limit(c, 'search-device', 20, 60, guest.deviceId);
   const { q } = query(c, z.object({ q: z.string().min(1).max(100) }));
-  const result = await searchTracks(c.env.DB, c.var.rt.spotify, q, now);
+  const settings = await loadSettings(c.env.DB, now);
+  const { spotify, lastfm } = c.var.rt;
+  const result = await searchTracks(c.env.DB, { spotify, lastfm, settings }, q, now);
+  if (result.hidden > 0) await hitRateLimit(c.env.DB, 'stat:search_hidden', 1_000_000, 86_400, now);
   const covers = await coversAllowed(c);
   return c.json({
     limited: result.limited,
     unavailable: result.unavailable,
+    hidden: result.hidden,
     tracks: result.tracks.map((t) => ({
       uri: t.uri,
       title: t.title,
@@ -195,9 +199,10 @@ publicRoutes.post('/wishes', async (c) => {
   await limit(c, 'wish-ip', 30, 600, ip.hash);
   const input = await body(c, z.object({ uri: z.string().regex(/^spotify:track:[A-Za-z0-9]{10,40}$/) }));
   const settings = await loadSettings(c.env.DB, now);
+  const { spotify, lastfm } = c.var.rt;
   try {
     return c.json(
-      await createWish(c.env.DB, c.var.rt.spotify, guest.deviceId, input.uri, now, {
+      await createWish(c.env.DB, { spotify, lastfm, settings }, guest.deviceId, input.uri, now, {
         ipKey: ip.hash,
         limit: ipVoteLimit(settings, ip.family),
       }),

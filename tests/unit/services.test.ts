@@ -18,6 +18,7 @@ import {
 import { createHttpSpotify, pathTemplate } from '../../src/server/services/spotify-http.ts';
 import { createWish, decideWish, guestWishes, searchTracks, upvoteWish } from '../../src/server/services/wishes.ts';
 import { claimPairing, pollPairing, startPairing, authenticateDisplay } from '../../src/server/services/displays.ts';
+import { defaultSettings } from '../../src/shared/settings.ts';
 import { FakeSpotify, makeTrack } from '../helpers/fake-spotify.ts';
 import { Clock, testEnv } from '../helpers/runtime.ts';
 
@@ -102,6 +103,7 @@ describe('Spotify-Anbindung', () => {
     const playing = await spotify.currentlyPlaying();
     expect(playing.ok && playing.value.track).toMatchObject({
       artist: 'Band, Gast',
+      artists: ['Band', 'Gast'],
       isrc: 'DEABC1234567',
       imageUrl: 'https://i.scdn.co/mid',
     });
@@ -277,7 +279,9 @@ describe('Songwünsche', () => {
     const env = testEnv();
     const spotify = new FakeSpotify(() => NOW);
     for (let i = 0; i < 5; i++) spotify.add(makeTrack(i, 200_000, 'wish'));
-    return { db: env.DB, spotify };
+    const base = defaultSettings(NOW);
+    const ctx = { spotify, lastfm: null, settings: { ...base, wishes: { autoApprove: false } } };
+    return { db: env.DB, spotify: ctx };
   }
 
   it('cacht Suchen und deckelt Spotify-Aufrufe global', async () => {
@@ -326,22 +330,23 @@ describe('Songwünsche', () => {
     const setId = await saveSet(db, { name: 'S', starts_at: NOW, ends_at: NOW + 3_600_000, default_level: 3 }, NOW);
     const first = await createWish(db, spotify, 'dev-a', uri(0), NOW);
     await decideWish(db, first.id, { approve: false }, 1, NOW);
-    const second = await createWish(db, spotify, 'dev-b', uri(0), NOW + 1);
-    expect(second.merged).toBe(false);
-
+    await expect(createWish(db, spotify, 'dev-b', uri(0), NOW + 1)).rejects.toThrow('vetoed');
     await expect(decideWish(db, first.id, { approve: true, setId, level: 5 }, 1, NOW + 2)).rejects.toThrow(
       'wish_not_open',
     );
+
+    const second = await createWish(db, spotify, 'dev-b', uri(2), NOW + 1);
     await decideWish(db, second.id, { approve: true, setId, level: null }, 1, NOW + 3);
-    await expect(decideWish(db, second.id, { approve: false }, 1, NOW + 4)).rejects.toThrow('wish_not_open');
     await expect(decideWish(db, second.id, { approve: true, setId, level: 1 }, 1, NOW + 5)).rejects.toThrow(
       'wish_not_open',
     );
     const song = await db
       .prepare('SELECT mood_level FROM songs WHERE spotify_uri = ?1')
-      .bind(uri(0))
+      .bind(uri(2))
       .first<{ mood_level: number | null }>();
     expect(song?.mood_level).toBeNull();
+    await decideWish(db, second.id, { approve: false }, 1, NOW + 4);
+    await expect(decideWish(db, second.id, { approve: false }, 1, NOW + 6)).rejects.toThrow('wish_not_open');
 
     const third = await createWish(db, spotify, 'dev-c', uri(1), NOW);
     await expect(decideWish(db, third.id, { approve: true, setId: 999, level: 4 }, 1, NOW)).rejects.toThrow(

@@ -1,4 +1,5 @@
 import { MIN_VOTING_MINUTES, type MoodLevel } from '../../shared/settings.ts';
+import { artistKey } from './genres.ts';
 import type { SpotifyTrack } from './spotify-api.ts';
 
 export class LibraryError extends Error {}
@@ -17,6 +18,10 @@ export interface SongRow {
   title_norm: string;
   artist_norm: string;
   active: number;
+  artist_key: string | null;
+  auto_level: number | null;
+  blocked_tag: string | null;
+  vetoed: number;
 }
 
 export interface SetRow {
@@ -42,7 +47,7 @@ export function normalizeArtist(value: string): string {
   return normalizeTitle(value.split(/,|&| feat\.? | ft\.? | x /i)[0] ?? value);
 }
 
-const SONG_COLUMNS = 11;
+const SONG_COLUMNS = 13;
 const ROWS_PER_STATEMENT = Math.floor(100 / SONG_COLUMNS);
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -51,7 +56,17 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
-export function songUpsertStatements(db: D1Database, tracks: SpotifyTrack[], now: number): D1PreparedStatement[] {
+interface UpsertOptions {
+  adminOverride: boolean;
+  autoLevel: number | null;
+}
+
+export function songUpsertStatements(
+  db: D1Database,
+  tracks: SpotifyTrack[],
+  now: number,
+  { adminOverride, autoLevel }: UpsertOptions,
+): D1PreparedStatement[] {
   return chunk(dedupeTracks(tracks), ROWS_PER_STATEMENT).map((rows) => {
     const values = rows.map(
       (_, i) => `(${Array.from({ length: SONG_COLUMNS }, (_, c) => `?${i * SONG_COLUMNS + c + 1}`).join(', ')})`,
@@ -67,11 +82,13 @@ export function songUpsertStatements(db: D1Database, tracks: SpotifyTrack[], now
       t.explicit ? 1 : 0,
       normalizeTitle(t.title),
       normalizeArtist(t.artist),
+      t.artists[0] ? artistKey(t.artists[0]) : null,
+      autoLevel,
       now,
     ]);
     return db
       .prepare(
-        `INSERT INTO songs (spotify_uri, isrc, title, artist, album, image_url, duration_ms, explicit, title_norm, artist_norm, created_at)
+        `INSERT INTO songs (spotify_uri, isrc, title, artist, album, image_url, duration_ms, explicit, title_norm, artist_norm, artist_key, auto_level, created_at)
          SELECT * FROM (VALUES ${values.join(', ')}) AS v
          WHERE NOT EXISTS (SELECT 1 FROM songs s WHERE v.column2 IS NOT NULL AND s.isrc = v.column2 AND s.spotify_uri <> v.column1)
          ON CONFLICT (spotify_uri) DO UPDATE SET
@@ -83,7 +100,10 @@ export function songUpsertStatements(db: D1Database, tracks: SpotifyTrack[], now
            duration_ms = excluded.duration_ms,
            explicit = excluded.explicit,
            title_norm = excluded.title_norm,
-           artist_norm = excluded.artist_norm`,
+           artist_norm = excluded.artist_norm,
+           artist_key = COALESCE(excluded.artist_key, songs.artist_key)${
+             adminOverride ? ', blocked_tag = NULL, vetoed = 0' : ''
+           }`,
       )
       .bind(...params);
   });
@@ -108,8 +128,9 @@ function setSongStatements(db: D1Database, setId: number, tracks: SpotifyTrack[]
     const isrcParams = isrcs.map((_, i) => `?${i + 3 + uris.length}`).join(', ');
     return db
       .prepare(
-        `INSERT OR IGNORE INTO set_songs (set_id, song_id, added_at)
-         SELECT ?1, id, ?2 FROM songs WHERE spotify_uri IN (${uriParams})${isrcs.length ? ` OR isrc IN (${isrcParams})` : ''}`,
+        `INSERT INTO set_songs (set_id, song_id, added_at, source)
+         SELECT ?1, id, ?2, 'admin' FROM songs WHERE spotify_uri IN (${uriParams})${isrcs.length ? ` OR isrc IN (${isrcParams})` : ''}
+         ON CONFLICT (set_id, song_id) DO UPDATE SET source = 'admin'`,
       )
       .bind(setId, now, ...uris, ...isrcs);
   });
@@ -128,7 +149,7 @@ export async function importTracks(
   if (tracks.length === 0) return { imported: 0 };
   if (tracks.length > 60) throw new LibraryError('too_many_tracks');
   if (setId !== null && !(await setExists(db, setId))) throw new LibraryError('set_not_found');
-  const statements = songUpsertStatements(db, tracks, now);
+  const statements = songUpsertStatements(db, tracks, now, { adminOverride: true, autoLevel: null });
   if (setId !== null) statements.push(...setSongStatements(db, setId, tracks, now));
   await db.batch(statements);
   return { imported: dedupeTracks(tracks).length };
@@ -138,8 +159,13 @@ export async function songByUri(db: D1Database, uri: string): Promise<SongRow | 
   return db.prepare('SELECT * FROM songs WHERE spotify_uri = ?1').bind(uri).first<SongRow>();
 }
 
-export async function ensureSong(db: D1Database, track: SpotifyTrack, now: number): Promise<SongRow> {
-  await db.batch(songUpsertStatements(db, [track], now));
+export async function ensureSong(
+  db: D1Database,
+  track: SpotifyTrack,
+  now: number,
+  autoLevel: number | null = null,
+): Promise<SongRow> {
+  await db.batch(songUpsertStatements(db, [track], now, { adminOverride: false, autoLevel }));
   const direct = await songByUri(db, track.uri);
   if (direct) return direct;
   const viaIsrc = track.isrc
@@ -235,11 +261,11 @@ export async function setCoverage(
   const sets = await listSets(db);
   const { results } = await db
     .prepare(
-      `SELECT ss.set_id, COALESCE(s.mood_level, st.default_level) AS level, COUNT(*) AS songs, SUM(s.duration_ms) AS ms
+      `SELECT ss.set_id, COALESCE(s.mood_level, s.auto_level, st.default_level) AS level, COUNT(*) AS songs, SUM(s.duration_ms) AS ms
        FROM set_songs ss
        JOIN songs s ON s.id = ss.song_id
        JOIN sets st ON st.id = ss.set_id
-       WHERE s.active = 1
+       WHERE s.active = 1 AND s.blocked_tag IS NULL AND s.vetoed = 0
          AND NOT EXISTS (SELECT 1 FROM playback p WHERE p.song_id = s.id AND p.status IN ('playing', 'played'))
        GROUP BY ss.set_id, level`,
     )

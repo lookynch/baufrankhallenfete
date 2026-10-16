@@ -1,12 +1,13 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { settingsSchemas, type SettingsKey } from '../../../shared/settings.ts';
+import { settingsSchemas, type Settings, type SettingsKey } from '../../../shared/settings.ts';
 import { body, clientIpHash, fail, idParam, query, type AppEnv } from '../../http.ts';
 import { clearRateLimit, peekRateLimit } from '../../security/ratelimit.ts';
 import { audit, auditStatement } from '../../services/audit.ts';
 import { readBudget } from '../../services/budget.ts';
 import { claimPairing, DisplayError, displayKinds } from '../../services/displays.ts';
 import { getKv } from '../../services/kv.ts';
+import { reclassifyWishSongs } from '../../services/wishes.ts';
 import { setCoverage } from '../../services/library.ts';
 import {
   accountBalances,
@@ -76,6 +77,7 @@ systemRoutes.get('/dashboard', async (c) => {
     .prepare(
       `SELECT (SELECT COUNT(*) FROM devices) AS devices,
               (SELECT COUNT(*) FROM wishes WHERE status = 'open') AS open_wishes,
+              (SELECT COUNT(*) FROM wishes WHERE status = 'approved') AS waiting_wishes,
               (SELECT COUNT(*) FROM buzzer_events WHERE flagged = 1) AS flagged_presses,
               (SELECT COUNT(*) FROM votes) AS votes`,
     )
@@ -98,6 +100,8 @@ systemRoutes.get('/dashboard', async (c) => {
     displays: displays.results,
     budget: await readBudget(db),
     ipLimitRejections: await peekRateLimit(db, 'stat:ip_limit_rejections', 86_400, now),
+    hiddenSearches: await peekRateLimit(db, 'stat:search_hidden', 86_400, now),
+    genreFilter: Boolean(c.env.LASTFM_API_KEY),
     emergencies,
     counts,
     coverage: await setCoverage(db, settings.voting),
@@ -117,12 +121,17 @@ systemRoutes.put('/settings/:key', async (c) => {
   const patch = await body(c, z.record(z.string(), z.unknown()));
   try {
     const change = await saveSettings(c.env.DB, key as SettingsKey, patch, now, c.var.admin.userId);
+    const reclassified =
+      key === 'filter'
+        ? await reclassifyWishSongs(c.env.DB, (change.after as Settings['filter']).blockedTags, now)
+        : null;
     await audit(c.env.DB, now, {
       userId: c.var.admin.userId,
       action: 'settings_update',
       entity: 'settings',
       entityId: key,
-      ...change,
+      before: change.before,
+      after: reclassified ? { ...change.after, reclassified } : change.after,
     });
     return c.json(change.after);
   } catch (error) {

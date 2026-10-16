@@ -15,6 +15,7 @@ Interne Dokumentation des Betreibers zur Rechenschaftspflicht (Art. 5 Abs. 2 DSG
 | Admin-Helfer                              | Handeln auf Weisung des Betreibers (Art. 29 DSGVO).                                                                                                                                                                                                                                                 |
 | Cloudflare, Inc.                          | Auftragsverarbeiter für Pages, Functions, D1 und optional Access (Abschnitt 7). Netzwerk- und Sicherheitsdaten verarbeitet Cloudflare zusätzlich in eigener Verantwortung (Self-Serve Subscription Agreement Ziff. 2.5.5 „Network Data“); die Rolle ist vertraglich nicht eindeutig **[unsicher]**. |
 | Spotify AB, Stockholm                     | Empfänger von Suchtexten und Track-Kennungen, die der Server ohne IP-Adresse und Geräte-ID sendet. Ist der Party-Account ein privates Konto, ist der Betreiber für dessen Wiedergabedaten nach den Spotify Developer Terms (Anhang A) eigener Verantwortlicher.                                     |
+| Last.fm Ltd., London                      | Empfänger von Künstlernamen aus Suchergebnissen (Genre-Filter). Der Server sendet nur den Namen, ohne Suchtext, IP-Adresse oder Geräte-ID; kein Personenbezug, daher keine Drittlandübermittlung personenbezogener Daten.                                                                           |
 | Google (Gmail)                            | Postfach des Betreibers für Anfragen. Rolle und Drittlandbezug nicht geprüft **[unsicher]**.                                                                                                                                                                                                        |
 | Buchhaltung des Ausrichters               | Erhält nach der Fete das Verbrauchsprotokoll (CSV) mit der Spalte „Erfasst von“ (Anzeigename des Admins).                                                                                                                                                                                           |
 
@@ -143,6 +144,7 @@ Für alle Verarbeitungen gilt: Die Teilnahme ist freiwillig, es werden keine Nam
 - Interesse: Songwünsche ermöglichen.
 - Erforderlichkeit: Der Katalog ist nur über die Spotify-API durchsuchbar. Der Server sendet nur Suchtext bzw. Track-Kennung, der Cache (24 h) spart Anfragen.
 - Abwägung: Persönliche Angaben im Suchtext sind möglich. Die Suche bittet daher um Song- oder Künstlernamen, Spotify AB sitzt in der EU.
+- Genre-Filter: Für den Hauptkünstler jedes Treffers fragt der Server die Top-Tags bei Last.fm ab und speichert sie 30 Tage in `artist_tags`. Übermittelt wird nur der Künstlername aus dem Spotify-Katalog, nie der Suchtext oder Gastdaten.
 
 **g) Kontakt per E-Mail**
 

@@ -62,6 +62,8 @@ Noch manuell (siehe README, Abschnitt "Einmalige Einrichtung"):
      Deploy und der tägliche Workflow "Datenlöschung" nutzen diesen Token.
   2. Spotify-App anlegen (Redirect-URI https://$PROJECT.pages.dev/admin/spotify/callback)
      -> Secrets SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET.
+     Last.fm-API-Key (kostenlos, https://www.last.fm/api/account/create) -> Secret LASTFM_API_KEY
+     (ohne ihn ist der Genre-Filter für Gästewünsche aus; das Dashboard warnt dann).
   3. Cloudflare Access für /admin* und /api/admin* (auch *.$PROJECT.pages.dev) -> ACCESS_TEAM_DOMAIN, ACCESS_AUD.
   4. Dringend empfohlen: Analytics-Token (Account Analytics: Read) -> CF_ANALYTICS_TOKEN
      (ohne ihn arbeitet der Budget-Wächter nicht; das Dashboard warnt dann).

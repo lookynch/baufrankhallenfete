@@ -230,7 +230,7 @@ musicRoutes.get('/songs', async (c) => {
     const setLevel = input.setId
       ? `(SELECT default_level FROM sets WHERE id = ${Number(input.setId)})`
       : '(SELECT MIN(st.default_level) FROM set_songs x JOIN sets st ON st.id = x.set_id WHERE x.song_id = s.id)';
-    conditions.push(`COALESCE(s.mood_level, ${setLevel}) = ${p}`);
+    conditions.push(`COALESCE(s.mood_level, s.auto_level, ${setLevel}) = ${p}`);
   }
   params.push(input.offset);
   const { results } = await c.env.DB.prepare(
@@ -251,18 +251,25 @@ musicRoutes.patch('/songs/:id', async (c) => {
   const id = idParam(c);
   const input = await body(
     c,
-    z.object({ mood_level: moodLevelSchema.nullable().optional(), active: z.boolean().optional() }),
+    z.object({
+      mood_level: moodLevelSchema.nullable().optional(),
+      active: z.boolean().optional(),
+      vetoed: z.literal(false).optional(),
+    }),
   );
-  const before = await c.env.DB.prepare('SELECT mood_level, active FROM songs WHERE id = ?1').bind(id).first();
+  const before = await c.env.DB.prepare('SELECT mood_level, active, vetoed FROM songs WHERE id = ?1').bind(id).first();
   if (!before) fail(404, 'song_not_found');
   await c.env.DB.prepare(
-    `UPDATE songs SET mood_level = CASE WHEN ?2 THEN ?3 ELSE mood_level END, active = COALESCE(?4, active) WHERE id = ?1`,
+    `UPDATE songs SET mood_level = CASE WHEN ?2 THEN ?3 ELSE mood_level END, active = COALESCE(?4, active),
+                      vetoed = CASE WHEN ?5 THEN 0 ELSE vetoed END
+     WHERE id = ?1`,
   )
     .bind(
       id,
       input.mood_level !== undefined ? 1 : 0,
       input.mood_level ?? null,
       input.active === undefined ? null : input.active ? 1 : 0,
+      input.vetoed === false ? 1 : 0,
     )
     .run();
   await audit(c.env.DB, now, {
@@ -293,13 +300,18 @@ musicRoutes.post('/sets/:setId/songs/:songId/remove', async (c) => {
 musicRoutes.post('/sets/:setId/songs/:songId/add', async (c) => {
   const setId = idParam(c, 'setId');
   const songId = idParam(c, 'songId');
-  const added = await c.env.DB.prepare(
-    `INSERT OR IGNORE INTO set_songs (set_id, song_id, added_at)
-     SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM sets WHERE id = ?1) AND EXISTS (SELECT 1 FROM songs WHERE id = ?2)`,
-  )
-    .bind(setId, songId, c.var.rt.now())
-    .run();
-  if (added.meta.changes === 0) {
+  const [added] = await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO set_songs (set_id, song_id, added_at, source)
+       SELECT ?1, ?2, ?3, 'admin' WHERE EXISTS (SELECT 1 FROM sets WHERE id = ?1) AND EXISTS (SELECT 1 FROM songs WHERE id = ?2)
+       ON CONFLICT (set_id, song_id) DO UPDATE SET source = 'admin'`,
+    ).bind(setId, songId, c.var.rt.now()),
+    c.env.DB.prepare(
+      `UPDATE songs SET blocked_tag = NULL, vetoed = 0
+       WHERE id = ?2 AND EXISTS (SELECT 1 FROM set_songs WHERE set_id = ?1 AND song_id = ?2 AND source = 'admin')`,
+    ).bind(setId, songId),
+  ]);
+  if (added?.meta.changes === 0) {
     if (!(await setExists(c.env.DB, setId))) fail(404, 'set_not_found');
     const song = await c.env.DB.prepare('SELECT 1 AS found FROM songs WHERE id = ?1').bind(songId).first();
     if (!song) fail(404, 'song_not_found');
@@ -570,6 +582,7 @@ musicRoutes.get('/wishes', async (c) => {
   const { status } = query(c, z.object({ status: z.enum(['open', 'approved', 'rejected', 'played']).default('open') }));
   const { results } = await c.env.DB.prepare(
     `SELECT w.id, w.status, w.created_at, w.decided_at, s.id AS song_id, s.title, s.artist, s.image_url, s.explicit, s.mood_level,
+            s.auto_level, s.blocked_tag, s.vetoed,
             (SELECT COUNT(*) FROM wish_upvotes u WHERE u.wish_id = w.id) AS upvotes,
             u2.display_name AS decided_by_name
      FROM wishes w JOIN songs s ON s.id = w.song_id LEFT JOIN admin_users u2 ON u2.id = w.decided_by

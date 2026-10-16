@@ -1,4 +1,5 @@
 import type { Env, Runtime } from '../../src/server/env.ts';
+import type { Lastfm } from '../../src/server/services/genres.ts';
 import type { SpotifyApi } from '../../src/server/services/spotify-api.ts';
 import { createTestDb } from './d1.ts';
 
@@ -24,12 +25,18 @@ export class Clock {
   }
 }
 
-export function testRuntime(env: Env, clock: Clock, spotify: SpotifyApi): Runtime & { settle: () => Promise<void> } {
+export function testRuntime(
+  env: Env,
+  clock: Clock,
+  spotify: SpotifyApi,
+  lastfm: Lastfm | null = null,
+): Runtime & { settle: () => Promise<void> } {
   const pending: Promise<unknown>[] = [];
   return {
     env,
     now: clock.now,
     spotify,
+    lastfm,
     waitUntil: (p) => {
       pending.push(p);
     },

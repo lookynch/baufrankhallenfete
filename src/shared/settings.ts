@@ -10,6 +10,24 @@ export const moodLevels = [1, 2, 3, 4, 5] as const;
 export type MoodLevel = (typeof moodLevels)[number];
 export const moodLevelSchema = z.number().int().min(1).max(5);
 
+export const DEFAULT_BLOCKED_TAGS = [
+  'metal',
+  'grindcore',
+  'deathcore',
+  'metalcore',
+  'djent',
+  'hardcore punk',
+  'screamo',
+  'harsh noise',
+  'polka',
+  'polish folk',
+  'disco polo',
+  'volksmusik',
+  'volkstumliche musik',
+  'blasmusik',
+  'oberkrainer',
+];
+
 export const settingsSchemas = {
   event: z.object({
     name: z.string().min(1).max(80),
@@ -35,6 +53,12 @@ export const settingsSchemas = {
   }),
   nextRound: z.object({
     levelOverride: moodLevelSchema.nullable(),
+  }),
+  wishes: z.object({
+    autoApprove: z.boolean(),
+  }),
+  filter: z.object({
+    blockedTags: z.array(z.string().trim().min(2).max(40)).max(100),
   }),
   security: z.object({
     votesPerIpV4: z.number().int().min(1).max(50),
@@ -84,6 +108,8 @@ export function defaultSettings(now: number): Settings {
     },
     preshow: { playlistUri: null, level: 2 },
     nextRound: { levelOverride: null },
+    wishes: { autoApprove: true },
+    filter: { blockedTags: DEFAULT_BLOCKED_TAGS },
     security: { votesPerIpV4: 3, votesPerIpV6: 1, votesPerNetV6: 5 },
     ledger: {
       cratePriceCents: 1_890,

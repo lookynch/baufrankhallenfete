@@ -1,6 +1,17 @@
+import type { Settings } from '../../shared/settings.ts';
 import { trackIdFromUri } from '../../shared/spotify.ts';
 import { hitRateLimit } from '../security/ratelimit.ts';
-import { ensureSong, normalizeTitle, setExists } from './library.ts';
+import {
+  blockedTermSet,
+  classify,
+  loadArtistTags,
+  NEW_ARTISTS_PER_SEARCH,
+  verdictFor,
+  type ArtistTag,
+  type Lastfm,
+  type TrackVerdict,
+} from './genres.ts';
+import { ensureSong, listSets, normalizeTitle, setActiveAt, setExists } from './library.ts';
 import type { SpotifyApi, SpotifyTrack } from './spotify-api.ts';
 
 export class WishError extends Error {}
@@ -10,7 +21,15 @@ const GLOBAL_SEARCH_LIMIT = 10;
 const GLOBAL_SEARCH_WINDOW_S = 30;
 const GLOBAL_TRACK_LIMIT = 10;
 const GLOBAL_TRACK_WINDOW_S = 30;
-const OPEN_WISHES_PER_DEVICE = 3;
+const WISHES_PER_DEVICE = 3;
+const WISH_LIMIT_WINDOW_MS = 60 * 60_000;
+const MINUTE = 60_000;
+
+export interface WishContext {
+  spotify: SpotifyApi;
+  lastfm: Lastfm | null;
+  settings: Settings;
+}
 
 export interface UpvoteNetwork {
   ipKey: string;
@@ -25,7 +44,78 @@ export function normalizeQuery(query: string): string {
   return normalizeTitle(query).slice(0, 60);
 }
 
+interface KnownSong {
+  spotify_uri: string;
+  vetoed: number;
+  admin_listed: number;
+}
+
+async function knownSongs(db: D1Database, uris: string[]): Promise<Map<string, KnownSong>> {
+  if (uris.length === 0) return new Map();
+  const { results } = await db
+    .prepare(
+      `SELECT s.spotify_uri, s.vetoed,
+              EXISTS (SELECT 1 FROM set_songs x WHERE x.song_id = s.id AND x.source = 'admin') AS admin_listed
+       FROM songs s WHERE s.spotify_uri IN (${uris.map((_, i) => `?${i + 1}`).join(', ')})`,
+    )
+    .bind(...uris)
+    .all<KnownSong>();
+  return new Map(results.map((r) => [r.spotify_uri, r]));
+}
+
+async function verdicts(
+  db: D1Database,
+  ctx: WishContext,
+  tracks: SpotifyTrack[],
+  now: number,
+  maxFetch: number,
+): Promise<TrackVerdict[]> {
+  if (!ctx.lastfm) return tracks.map(() => ({ kind: 'allowed', level: null }));
+  const tags = await loadArtistTags(
+    db,
+    ctx.lastfm,
+    tracks.flatMap((t) => t.artists.slice(0, 1)),
+    now,
+    maxFetch,
+  );
+  const blocked = blockedTermSet(ctx.settings.filter.blockedTags);
+  return tracks.map((t) => verdictFor(t.artists[0], tags, blocked));
+}
+
+async function partyFilter(
+  db: D1Database,
+  ctx: WishContext,
+  tracks: SpotifyTrack[],
+  now: number,
+): Promise<{ tracks: SpotifyTrack[]; hidden: number }> {
+  const known = await knownSongs(
+    db,
+    tracks.map((t) => t.uri),
+  );
+  const open = tracks.filter((t) => !known.get(t.uri)?.vetoed);
+  const unchecked = open.filter((t) => !known.get(t.uri)?.admin_listed);
+  const results = await verdicts(db, ctx, unchecked, now, NEW_ARTISTS_PER_SEARCH);
+  const blocked = new Set(unchecked.filter((_, i) => results[i]!.kind === 'blocked').map((t) => t.uri));
+  const visible = open.filter((t) => !blocked.has(t.uri));
+  return { tracks: visible, hidden: tracks.length - visible.length };
+}
+
+function parseCached(results: string): SpotifyTrack[] {
+  return (JSON.parse(results) as SpotifyTrack[]).map((t) => ({ ...t, artists: t.artists ?? [] }));
+}
+
 export async function searchTracks(
+  db: D1Database,
+  ctx: WishContext,
+  query: string,
+  now: number,
+): Promise<{ tracks: SpotifyTrack[]; hidden: number; limited: boolean; unavailable: boolean }> {
+  const raw = await rawSearch(db, ctx.spotify, query, now);
+  if (raw.tracks.length === 0) return { ...raw, hidden: 0 };
+  return { ...raw, ...(await partyFilter(db, ctx, raw.tracks, now)) };
+}
+
+async function rawSearch(
   db: D1Database,
   spotify: SpotifyApi,
   query: string,
@@ -38,12 +128,12 @@ export async function searchTracks(
     .bind(normalized)
     .first<{ results: string; fetched_at: number }>();
   if (cached && now - cached.fetched_at < SEARCH_CACHE_MS) {
-    return { tracks: JSON.parse(cached.results) as SpotifyTrack[], limited: false, unavailable: false };
+    return { tracks: parseCached(cached.results), limited: false, unavailable: false };
   }
   const budget = await hitRateLimit(db, 'spotify:search', GLOBAL_SEARCH_LIMIT, GLOBAL_SEARCH_WINDOW_S, now);
   if (!budget.allowed) {
     return {
-      tracks: cached ? (JSON.parse(cached.results) as SpotifyTrack[]) : [],
+      tracks: cached ? parseCached(cached.results) : [],
       limited: !cached,
       unavailable: false,
     };
@@ -52,7 +142,7 @@ export async function searchTracks(
   if (!result.ok) {
     const rateLimited = result.kind === 'rate_limited';
     return {
-      tracks: cached ? (JSON.parse(cached.results) as SpotifyTrack[]) : [],
+      tracks: cached ? parseCached(cached.results) : [],
       limited: !cached && rateLimited,
       unavailable: !cached && !rateLimited,
     };
@@ -73,15 +163,48 @@ async function trackFromCache(db: D1Database, uri: string): Promise<SpotifyTrack
     .bind(`%${uri}%`)
     .all<{ results: string }>();
   for (const row of results) {
-    const match = (JSON.parse(row.results) as SpotifyTrack[]).find((t) => t.uri === uri);
+    const match = parseCached(row.results).find((t) => t.uri === uri);
     if (match) return match;
   }
   return null;
 }
 
+async function lookupTrack(db: D1Database, spotify: SpotifyApi, trackId: string, uri: string, now: number) {
+  const cached = await trackFromCache(db, uri);
+  if (cached) return cached;
+  const budget = await hitRateLimit(db, 'spotify:track', GLOBAL_TRACK_LIMIT, GLOBAL_TRACK_WINDOW_S, now);
+  if (!budget.allowed) throw new WishError('limited');
+  const fetched = await spotify.track(trackId);
+  if (!fetched.ok) throw new WishError('track_unavailable');
+  return fetched.value;
+}
+
+async function wishTargetSet(db: D1Database, settings: Settings, now: number): Promise<number | null> {
+  const playAt = now + settings.voting.minRoundMinutes * MINUTE + 2 * MINUTE;
+  return setActiveAt(await listSets(db), playAt)?.id ?? null;
+}
+
+function wishSetSongStatement(
+  db: D1Database,
+  setId: number,
+  songId: number,
+  wishMatch: { sql: string; value: string | number },
+  now: number,
+) {
+  return db
+    .prepare(
+      `INSERT OR IGNORE INTO set_songs (set_id, song_id, added_at, source)
+       SELECT ?1, ?2, ?4, 'wish'
+       WHERE EXISTS (
+         SELECT 1 FROM wishes WHERE ${wishMatch.sql} AND song_id = ?2 AND status = 'approved' AND decided_at = ?4
+       )`,
+    )
+    .bind(setId, songId, wishMatch.value, now);
+}
+
 export async function createWish(
   db: D1Database,
-  spotify: SpotifyApi,
+  ctx: WishContext,
   deviceId: string,
   uri: string,
   now: number,
@@ -89,45 +212,69 @@ export async function createWish(
 ): Promise<{ id: number; key: string; status: string; merged: boolean }> {
   const trackId = trackIdFromUri(uri);
   if (!trackId) throw new WishError('invalid_track');
-  const open = await db
-    .prepare("SELECT COUNT(*) AS n FROM wishes WHERE device_id = ?1 AND status = 'open'")
-    .bind(deviceId)
-    .first<{ n: number }>();
-  if ((open?.n ?? 0) >= OPEN_WISHES_PER_DEVICE) throw new WishError('too_many_open_wishes');
+  const track = await lookupTrack(db, ctx.spotify, trackId, uri, now);
+  if (track.explicit && !ctx.settings.voting.allowExplicit) throw new WishError('explicit_not_allowed');
 
-  let track = await trackFromCache(db, uri);
-  if (!track) {
-    const budget = await hitRateLimit(db, 'spotify:track', GLOBAL_TRACK_LIMIT, GLOBAL_TRACK_WINDOW_S, now);
-    if (!budget.allowed) throw new WishError('limited');
-    const fetched = await spotify.track(trackId);
-    if (!fetched.ok) throw new WishError('track_unavailable');
-    track = fetched.value;
+  const known = (await knownSongs(db, [track.uri])).get(track.uri);
+  if (known?.vetoed) throw new WishError('vetoed');
+  let autoLevel: number | null = null;
+  if (!known?.admin_listed) {
+    const [verdict] = await verdicts(db, ctx, [track], now, 1);
+    if (verdict?.kind === 'blocked') throw new WishError('not_party_fit');
+    if (verdict?.kind === 'unknown') throw new WishError('classification_unavailable');
+    autoLevel = verdict?.kind === 'allowed' ? verdict.level : null;
   }
-  const song = await ensureSong(db, track, now);
+
+  const song = await ensureSong(db, track, now, autoLevel);
+  if (song.vetoed) throw new WishError('vetoed');
   const played = await db
     .prepare("SELECT 1 AS x FROM playback WHERE song_id = ?1 AND status IN ('playing', 'played') LIMIT 1")
     .bind(song.id)
     .first();
   if (played) throw new WishError('already_played');
 
-  const inserted = await db
-    .prepare(
-      `INSERT INTO wishes (song_id, device_id, status, created_at)
-       SELECT ?1, ?2, 'open', ?3
-       WHERE NOT EXISTS (SELECT 1 FROM wishes WHERE song_id = ?1 AND status IN ('open', 'approved'))
-       ON CONFLICT DO NOTHING RETURNING id, status`,
-    )
-    .bind(song.id, deviceId, now)
-    .first<{ id: number; status: string }>();
+  const setId = ctx.settings.wishes.autoApprove ? await wishTargetSet(db, ctx.settings, now) : null;
+  const status = setId === null ? 'open' : 'approved';
+  const statements = [
+    db
+      .prepare(
+        `INSERT INTO wishes (song_id, device_id, status, created_at, decided_at)
+         SELECT ?1, ?2, ?4, ?3, CASE WHEN ?4 = 'approved' THEN ?3 END
+         WHERE NOT EXISTS (SELECT 1 FROM wishes WHERE song_id = ?1 AND status IN ('open', 'approved'))
+           AND (SELECT COUNT(*) FROM wishes
+                WHERE device_id = ?2 AND status IN ('open', 'approved') AND created_at > ?3 - ?5) < ?6
+         ON CONFLICT DO NOTHING RETURNING id, status`,
+      )
+      .bind(song.id, deviceId, now, status, WISH_LIMIT_WINDOW_MS, WISHES_PER_DEVICE),
+  ];
+  if (setId !== null) {
+    statements.push(
+      wishSetSongStatement(db, setId, song.id, { sql: 'device_id = ?3 AND created_at = ?4', value: deviceId }, now),
+    );
+  }
+  const [result] = await db.batch<{ id: number; status: string }>(statements);
+  const inserted = result?.results[0];
   if (inserted) return { id: inserted.id, key: wishKey(inserted.id), status: inserted.status, merged: false };
 
   const existing = await db
     .prepare("SELECT id, status FROM wishes WHERE song_id = ?1 AND status IN ('open', 'approved')")
     .bind(song.id)
     .first<{ id: number; status: string }>();
-  if (!existing) throw new WishError('wish_conflict');
+  if (!existing) throw new WishError('too_many_open_wishes');
+  let mergedStatus = existing.status;
+  if (existing.status === 'open' && setId !== null) {
+    const [approved] = await db.batch([
+      db
+        .prepare(
+          "UPDATE wishes SET status = 'approved', decided_at = ?2, decided_by = NULL WHERE id = ?1 AND status = 'open'",
+        )
+        .bind(existing.id, now),
+      wishSetSongStatement(db, setId, song.id, { sql: 'id = ?3', value: existing.id }, now),
+    ]);
+    if (approved?.meta.changes === 1) mergedStatus = 'approved';
+  }
   await insertUpvote(db, existing.id, deviceId, now, network, true);
-  return { id: existing.id, key: wishKey(existing.id), status: existing.status, merged: true };
+  return { id: existing.id, key: wishKey(existing.id), status: mergedStatus, merged: true };
 }
 
 async function insertUpvote(
@@ -203,17 +350,8 @@ export async function decideWish(
     .bind(wishId)
     .first<{ id: number; song_id: number; status: string }>();
   if (!wish) throw new WishError('wish_not_found');
+  if (!decision.approve) return vetoWish(db, wish, userId, now);
   if (wish.status !== 'open') throw new WishError('wish_not_open');
-  if (!decision.approve) {
-    const rejected = await db
-      .prepare(
-        "UPDATE wishes SET status = 'rejected', decided_at = ?2, decided_by = ?3 WHERE id = ?1 AND status = 'open'",
-      )
-      .bind(wishId, now, userId)
-      .run();
-    if (rejected.meta.changes !== 1) throw new WishError('wish_not_open');
-    return { before: wish, after: { status: 'rejected' } };
-  }
   if (!(await setExists(db, decision.setId))) throw new WishError('set_not_found');
   const approvedNow = "EXISTS (SELECT 1 FROM wishes WHERE id = ?3 AND status = 'approved' AND decided_at = ?4)";
   const statements = [
@@ -223,7 +361,9 @@ export async function decideWish(
       )
       .bind(wishId, now, userId),
     db
-      .prepare(`INSERT OR IGNORE INTO set_songs (set_id, song_id, added_at) SELECT ?1, ?2, ?4 WHERE ${approvedNow}`)
+      .prepare(
+        `INSERT OR IGNORE INTO set_songs (set_id, song_id, added_at, source) SELECT ?1, ?2, ?4, 'wish' WHERE ${approvedNow}`,
+      )
       .bind(decision.setId, wish.song_id, wishId, now),
   ];
   if (decision.level !== null) {
@@ -236,4 +376,84 @@ export async function decideWish(
   const [approved] = await db.batch(statements);
   if (approved?.meta.changes !== 1) throw new WishError('wish_not_open');
   return { before: wish, after: { status: 'approved', setId: decision.setId, level: decision.level } };
+}
+
+async function vetoWish(
+  db: D1Database,
+  wish: { id: number; song_id: number; status: string },
+  userId: number,
+  now: number,
+): Promise<{ before: unknown; after: unknown }> {
+  if (wish.status !== 'open' && wish.status !== 'approved') throw new WishError('wish_not_open');
+  const vetoedNow = "EXISTS (SELECT 1 FROM wishes WHERE id = ?2 AND status = 'rejected' AND decided_at = ?3)";
+  const [rejected, , , cancelled] = await db.batch([
+    db
+      .prepare(
+        `UPDATE wishes SET status = 'rejected', decided_at = ?2, decided_by = ?3
+         WHERE id = ?1 AND status IN ('open', 'approved')`,
+      )
+      .bind(wish.id, now, userId),
+    db.prepare(`UPDATE songs SET vetoed = 1 WHERE id = ?1 AND ${vetoedNow}`).bind(wish.song_id, wish.id, now),
+    db
+      .prepare(`DELETE FROM set_songs WHERE song_id = ?1 AND source = 'wish' AND ${vetoedNow}`)
+      .bind(wish.song_id, wish.id, now),
+    db
+      .prepare(`UPDATE playback SET status = 'cancelled' WHERE song_id = ?1 AND status = 'planned' AND ${vetoedNow}`)
+      .bind(wish.song_id, wish.id, now),
+  ]);
+  if (rejected?.meta.changes !== 1) throw new WishError('wish_not_open');
+  return {
+    before: wish,
+    after: { status: 'rejected', vetoed: true, cancelledPlayback: cancelled?.meta.changes ?? 0 },
+  };
+}
+
+export async function reclassifyWishSongs(
+  db: D1Database,
+  blockedTags: string[],
+  now: number,
+): Promise<{ blocked: number; unblocked: number }> {
+  const { results } = await db
+    .prepare(
+      `SELECT s.id, s.blocked_tag, t.tags
+       FROM songs s JOIN artist_tags t ON t.artist_key = s.artist_key AND t.fetched_at > 0
+       WHERE EXISTS (SELECT 1 FROM wishes w WHERE w.song_id = s.id)
+         AND NOT EXISTS (SELECT 1 FROM set_songs x WHERE x.song_id = s.id AND x.source = 'admin')`,
+    )
+    .all<{ id: number; blocked_tag: string | null; tags: string }>();
+  const blocked = blockedTermSet(blockedTags);
+  const block = new Map<string, number[]>();
+  const unblock: number[] = [];
+  for (const row of results) {
+    const verdict = classify(JSON.parse(row.tags) as ArtistTag[], blocked);
+    if (verdict.blockedTag === row.blocked_tag) continue;
+    if (verdict.blockedTag === null) unblock.push(row.id);
+    else block.set(verdict.blockedTag, [...(block.get(verdict.blockedTag) ?? []), row.id]);
+  }
+  const ids = (list: number[], offset: number) => list.map((_, i) => `?${i + offset}`).join(', ');
+  const statements: D1PreparedStatement[] = [];
+  for (const [tag, songIds] of block) {
+    for (const part of chunk(songIds, 90)) {
+      statements.push(
+        db.prepare(`UPDATE songs SET blocked_tag = ?1 WHERE id IN (${ids(part, 2)})`).bind(tag, ...part),
+        db
+          .prepare(
+            `UPDATE wishes SET status = 'rejected', decided_at = ?1
+             WHERE status IN ('open', 'approved') AND song_id IN (${ids(part, 2)})`,
+          )
+          .bind(now, ...part),
+      );
+    }
+  }
+  for (const part of chunk(unblock, 90)) {
+    statements.push(db.prepare(`UPDATE songs SET blocked_tag = NULL WHERE id IN (${ids(part, 1)})`).bind(...part));
+  }
+  if (statements.length) await db.batch(statements);
+  return { blocked: [...block.values()].reduce((sum, list) => sum + list.length, 0), unblocked: unblock.length };
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
 }

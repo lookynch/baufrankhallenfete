@@ -107,20 +107,21 @@ describe('Wünsche', () => {
     const env = testEnv();
     const spotify = new FakeSpotify(() => NOW);
     for (let i = 0; i < 3; i++) spotify.add(makeTrack(i, 200_000, 'wish'));
-    return { db: env.DB, spotify };
+    const ctx = { spotify, lastfm: null, settings: { ...defaultSettings(NOW), wishes: { autoApprove: false } } };
+    return { db: env.DB, spotify, ctx };
   }
 
   it('begrenzt +1 pro Netz-Schlüssel wie Stimmen', async () => {
-    const { db, spotify } = await setup();
+    const { db, ctx } = await setup();
     const uri = makeTrack(0, 200_000, 'wish').uri;
-    const created = await createWish(db, spotify, 'dev-a', uri, NOW);
+    const created = await createWish(db, ctx, 'dev-a', uri, NOW);
     const setId = await saveSet(db, { name: 'S', starts_at: NOW, ends_at: NOW + 3_600_000, default_level: 3 }, NOW);
     await decideWish(db, created.id, { approve: true, setId, level: null }, 1, NOW);
     const network = { ipKey: 'ip-1', limit: 1 };
     expect(await upvoteWish(db, created.id, 'dev-b', NOW, network)).toBe(true);
     expect(await upvoteWish(db, created.id, 'dev-c', NOW, network)).toBe(false);
     expect(await upvoteWish(db, created.id, 'dev-c', NOW, { ipKey: 'ip-2', limit: 1 })).toBe(true);
-    const merged = await createWish(db, spotify, 'dev-d', uri, NOW, network);
+    const merged = await createWish(db, ctx, 'dev-d', uri, NOW, network);
     expect(merged.merged).toBe(true);
     const count = await db
       .prepare('SELECT COUNT(*) AS n FROM wish_upvotes WHERE wish_id = ?1')
@@ -130,7 +131,7 @@ describe('Wünsche', () => {
   });
 
   it('deckelt Spotify-Track-Abfragen für unbekannte URIs global', async () => {
-    const { db, spotify } = await setup();
+    const { db, spotify, ctx } = await setup();
     const lookup = spotify.track.bind(spotify);
     let calls = 0;
     spotify.track = (id) => {
@@ -141,7 +142,7 @@ describe('Wünsche', () => {
     for (let i = 0; i < 15; i++) {
       const uri = `spotify:track:unknown${String(i).padStart(6, '0')}`;
       results.push(
-        await createWish(db, spotify, `dev-${i}`, uri, NOW).then(
+        await createWish(db, ctx, `dev-${i}`, uri, NOW).then(
           () => 'ok',
           (e: Error) => e.message,
         ),

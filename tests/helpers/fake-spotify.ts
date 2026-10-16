@@ -161,6 +161,7 @@ export function makeTrack(index: number, durationMs = 210_000, prefix = 'song'):
     uri: `spotify:track:${id}`,
     title: `${prefix} title ${index}`,
     artist: `Artist ${index}`,
+    artists: [`Artist ${index}`],
     album: 'Album',
     imageUrl: null,
     durationMs,

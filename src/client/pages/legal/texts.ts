@@ -149,7 +149,7 @@ const privacyDe: LegalDocument = {
             ],
             [
               'Zweck',
-              'Wünsche entgegennehmen, prüfen lassen und ins Voting übernehmen, offene Wünsche je Gerät und Unterstützungen je Netz begrenzen und dir deine Wünsche anzeigen.',
+              'Wünsche entgegennehmen, anhand des Genres des Künstlers automatisch auf Partytauglichkeit prüfen und ins Voting übernehmen, Wünsche je Gerät und Unterstützungen je Netz begrenzen und dir deine Wünsche anzeigen.',
             ],
             [
               'Rechtsgrundlage',
@@ -498,7 +498,7 @@ const privacyEn: LegalDocument = {
             ],
             [
               'Purpose',
-              'Receiving requests, having them reviewed and adding them to the vote, limiting open requests per device and support per network, and showing you your requests.',
+              "Receiving requests, automatically checking whether they fit the party based on the artist's genre and adding them to the vote, limiting requests per device and support per network, and showing you your requests.",
             ],
             [
               'Legal basis',

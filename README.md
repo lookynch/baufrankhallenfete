@@ -12,6 +12,8 @@ Party-App für die Fete in der Baufrankhalle (IT Applications & Buchhaltung). L�
 ## So funktioniert der Abend
 
 - **Sets** legen fest, welche Songs wann zur Wahl stehen, und haben ein Standard-Stimmungslevel (1 Chill … 5 Eskalation).
+- **Songwünsche:** Gäste suchen beliebige Songs auf Spotify und wünschen sie mit einem Tipp. Passt der Song zur Party, wird er automatisch freigegeben, landet im Set, das zur nächsten Runde läuft, und kommt in eine der nächsten Abstimmungen (höchstens die Hälfte der Kandidaten sind Wünsche, jeder Wunsch höchstens dreimal). Die Stufe schätzt die App aus dem Genre; passt kein Genre, gilt die Stufe des Sets. Wünsche dürfen eine Stufe neben der Runde liegen, aber nie gegen die Richtung des Spannungsbogens. Pro Gerät sind 3 Wünsche pro Stunde möglich. Mit **Veto** im Admin fliegt ein Song aus Set, Voting und Warteschlange und kann nicht erneut gewünscht werden.
+- **Genre-Filter:** Zu jedem Hauptkünstler holt die App die Top-Tags von Last.fm (Cache 30 Tage). Steht ein Begriff der Sperrliste (Einstellungen → Genre-Filter, Vorgabe: Metal, Grindcore, Polka, Disco Polo, Volksmusik …) als ganzes Wort in einem Tag mit Gewicht ≥ 60, ist der Song in Suche und Voting ausgeblendet. Künstler ohne Tags sind erlaubt; Karaoke- oder Cover-Versionen unbekannter Interpreten rutschen deshalb durch, dafür gibt es das Veto. Songs, die ein Admin selbst importiert oder in ein Set legt, sind nie gesperrt. Ohne `LASTFM_API_KEY` ist der Filter aus. Ist die Sperrliste einmal gespeichert, kommen spätere Änderungen der Vorgabe im Code nicht mehr an.
 - **Erstes Voting** startet zur eingestellten Uhrzeit. Bis dahin läuft die Vorprogramm-Playlist.
 - **Jede Runde hat genau ein Stimmungslevel.** Von Runde zu Runde ändert es sich um höchstens eine Stufe, so gibt es keine harten Übergänge.
 - **Abstimmzeit mindestens 17 Minuten.** Die nächste Runde läuft, bis der letzte Gewinner-Song der vorherigen Runde anfängt. Es staut sich nie mehr als eine Runde, Filler-Songs gibt es nicht.
@@ -115,6 +117,7 @@ PW_CHROMIUM_PATH=/pfad/zu/chrome npm run test:e2e
 3. **Spotify-App** auf developer.spotify.com mit dem **Premium-Party-Account** anlegen:
    - Redirect-URI: `https://<projekt>.pages.dev/admin/spotify/callback`
    - Secrets `SPOTIFY_CLIENT_ID` und `SPOTIFY_CLIENT_SECRET`
+   - **Last.fm-API-Key** (kostenlos, [last.fm/api/account/create](https://www.last.fm/api/account/create)) als Secret `LASTFM_API_KEY` für den Genre-Filter
 4. **Cloudflare Access** (Zero Trust, gratis bis 50 Nutzer) einrichten:
    - Anwendung für `<projekt>.pages.dev/admin`, `/api/admin` **und** `*.<projekt>.pages.dev` (Deployment-URLs)
    - Optional `ACCESS_TEAM_DOMAIN` (z. B. `team.cloudflareaccess.com`) und `ACCESS_AUD` setzen, dann prüft die App das Token zusätzlich.
@@ -135,6 +138,7 @@ PW_CHROMIUM_PATH=/pfad/zu/chrome npm run test:e2e
 | `SESSION_PEPPER`, `COOKIE_SECRET`, `QR_SECRET`, `IP_HASH_SECRET`, `ENC_KEY` | ja                      | Kryptografie (je ≥ 32 Zufallszeichen)                         |
 | `BUZZER_HMAC_SECRET`                                                        | ja                      | Gleicher Wert in `agent/config.toml`                          |
 | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`                                | für Musik               | Spotify-App                                                   |
+| `LASTFM_API_KEY`                                                            | für den Genre-Filter    | Last.fm-API (ohne: Gäste können jeden Song wünschen)          |
 | `CF_ANALYTICS_TOKEN`                                                        | dringend empfohlen      | Budget-Wächter (ohne: keine Drosselung, Cover auch über 80 %) |
 | `BOOTSTRAP_TOKEN`                                                           | nur für Ersteinrichtung | Erster Owner                                                  |
 | `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`                                          | optional                | Access-JWT-Prüfung                                            |
@@ -151,7 +155,7 @@ Eine geänderte `PBKDF2_ITERATIONS` gilt für neue oder zurückgesetzte Passwör
 
 ## Offene Punkte vor dem Event
 
-- **Musikrechte (organisatorisch, nicht Teil der App):** Die Spotify Developer Terms erlauben nur private, persönliche Nutzung, die Developer Policy untersagt Produkte für Unternehmen. Eine Betriebsfeier ist voraussichtlich GEMA-pflichtig. Beides mit dem Ausrichter klären, es ist nicht abschließend geprüft.
+- **Musikrechte (organisatorisch, nicht Teil der App):** Die Spotify Developer Terms erlauben nur private, persönliche Nutzung, die Developer Policy untersagt Produkte für Unternehmen. Eine Betriebsfeier ist voraussichtlich GEMA-pflichtig. Beides mit dem Ausrichter klären, es ist nicht abschließend geprüft. Gleiches gilt für die Last.fm-API-Nutzungsbedingungen (Genre-Filter).
 - **Datenschutz:** Gespeichert werden Geräte-ID, pseudonymisierter Netz-Schlüssel und Stimmen; gelöscht wird automatisch. Offen sind die Rolle der GmbH (mögliche Mitverantwortung), der D1-Standort, der Cloudflare-Plan (Time Travel) und der Inhaber des Spotify-Party-Accounts, siehe [`docs/DATENSCHUTZ.md`](docs/DATENSCHUTZ.md).
 - **Buchhaltung:** Kontenrahmen bestätigen (Defaults sind SKR03-artig: 3980 Vorrat, 4140 Aufwand, 1600 Verbindlichkeiten), dazu Durchschnittspreis und Budget.
 
