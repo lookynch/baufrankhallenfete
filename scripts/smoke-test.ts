@@ -79,6 +79,18 @@ async function waitForServer() {
   throw new Error(`Server nicht erreichbar:\n${output}`);
 }
 
+async function redirectTarget(path: string): Promise<string> {
+  const res = await fetch(`${base}${path}`, { redirect: 'manual' });
+  const location = res.headers.get('location') ?? '';
+  return res.status >= 300 && res.status < 400 ? location.replace(base, '') : '';
+}
+
+async function manifestOf(path: string): Promise<string | null> {
+  const res = await fetch(`${base}${path}`, { redirect: 'manual' });
+  if (res.status !== 200) return null;
+  return /<link rel="manifest" href="([^"]+)"/.exec(await res.text())?.[1] ?? '';
+}
+
 const checks: Array<[string, () => Promise<boolean>]> = [
   ['Löschfristen-SQL läuft zweimal gegen lokale D1', async () => retentionRuns.every((status) => status === 0)],
   [
@@ -88,15 +100,36 @@ const checks: Array<[string, () => Promise<boolean>]> = [
   [
     'Startseite mit CSP aus _headers, ohne Fremdhosts',
     async () => {
-      const res = await fetch(`${base}/`);
+      const res = await fetch(`${base}/fete/`);
       const csp = res.headers.get('content-security-policy') ?? '';
       return res.ok && csp.includes("frame-ancestors 'none'") && !csp.includes('https:');
     },
   ],
-  ['SPA-Fallback für /admin', async () => (await fetch(`${base}/admin`)).ok],
   [
-    'SPA-Fallback für /datenschutz und /impressum',
-    async () => (await fetch(`${base}/datenschutz`)).ok && (await fetch(`${base}/impressum`)).ok,
+    'Alte Gast-Adressen leiten auf /fete um',
+    async () => (await redirectTarget('/')) === '/fete/' && (await redirectTarget('/v/ABC?x=1')) === '/fete/v/ABC?x=1',
+  ],
+  [
+    'Gast-Seiten tragen das Gast-Manifest',
+    async () =>
+      (await Promise.all(['/fete/', '/fete/v/ABC', '/fete/datenschutz'].map(manifestOf))).every(
+        (m) => m === '/pwa/guest.webmanifest',
+      ),
+  ],
+  [
+    'Admin-Seiten tragen das Admin-Manifest',
+    async () =>
+      (await Promise.all(['/admin/', '/admin/rounds', '/admin/spotify/callback?code=x'].map(manifestOf))).every(
+        (m) => m === '/pwa/admin.webmanifest',
+      ),
+  ],
+  [
+    '/fete und /admin ohne Schrägstrich leiten genau einmal um',
+    async () => (await redirectTarget('/fete')) === '/fete/' && (await redirectTarget('/admin')) === '/admin/',
+  ],
+  [
+    'Display und Rechtsseiten ohne Manifest',
+    async () => (await Promise.all(['/display', '/datenschutz', '/impressum'].map(manifestOf))).every((m) => m === ''),
   ],
   ['Cover-Proxy mit ungültiger ID → 404', async () => (await fetch(`${base}/api/cover/abc`)).status === 404],
   ['Display ohne Kopplung → 401', async () => (await fetch(`${base}/api/display/state`)).status === 401],
@@ -109,7 +142,7 @@ const checks: Array<[string, () => Promise<boolean>]> = [
           async (app) => ((await (await fetch(`${base}/pwa/${app}.webmanifest`)).json()) as { id: string }).id,
         ),
       );
-      return ids.join(' ') === '/ /admin/';
+      return ids.join(' ') === '/fete/ /admin/';
     },
   ],
   [

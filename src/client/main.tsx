@@ -4,9 +4,9 @@ import '@fontsource-variable/jetbrains-mono';
 import './styles.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Route, Routes } from 'react-router';
+import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router';
+import { guestHome } from '../shared/pwa.ts';
 import { I18nProvider } from './lib/i18n.tsx';
-import { applyPwaApp } from './lib/pwa.ts';
 import { applyTheme } from './lib/theme.ts';
 import { AdminApp } from './pages/admin/AdminApp.tsx';
 import { BootstrapPage, InvitePage, SpotifyCallbackPage } from './pages/admin/AuthPages.tsx';
@@ -15,14 +15,20 @@ import { GuestApp, JoinPage } from './pages/guest/GuestApp.tsx';
 import { ImprintPage, PrivacyPage } from './pages/legal/LegalPages.tsx';
 
 applyTheme();
-applyPwaApp();
+
+function LegacyJoinRedirect() {
+  const { token = '' } = useParams();
+  return <Navigate to={`${guestHome}v/${token}`} replace />;
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
+        <Route path="/" element={<Navigate to={guestHome} replace />} />
+        <Route path="/v/:token" element={<LegacyJoinRedirect />} />
         <Route
-          path="/"
+          path="/fete"
           element={
             <I18nProvider>
               <GuestApp />
@@ -30,7 +36,7 @@ createRoot(document.getElementById('root')!).render(
           }
         />
         <Route
-          path="/v/:token"
+          path="/fete/v/:token"
           element={
             <I18nProvider>
               <JoinPage />
@@ -45,22 +51,28 @@ createRoot(document.getElementById('root')!).render(
             </I18nProvider>
           }
         />
-        <Route
-          path="/datenschutz"
-          element={
-            <I18nProvider>
-              <PrivacyPage />
-            </I18nProvider>
-          }
-        />
-        <Route
-          path="/impressum"
-          element={
-            <I18nProvider>
-              <ImprintPage />
-            </I18nProvider>
-          }
-        />
+        {['/datenschutz', '/fete/datenschutz'].map((path) => (
+          <Route
+            key={path}
+            path={path}
+            element={
+              <I18nProvider>
+                <PrivacyPage />
+              </I18nProvider>
+            }
+          />
+        ))}
+        {['/impressum', '/fete/impressum'].map((path) => (
+          <Route
+            key={path}
+            path={path}
+            element={
+              <I18nProvider>
+                <ImprintPage />
+              </I18nProvider>
+            }
+          />
+        ))}
         <Route
           path="/admin/invite"
           element={
@@ -93,14 +105,7 @@ createRoot(document.getElementById('root')!).render(
             </I18nProvider>
           }
         />
-        <Route
-          path="*"
-          element={
-            <I18nProvider>
-              <GuestApp />
-            </I18nProvider>
-          }
-        />
+        <Route path="*" element={<Navigate to={guestHome} replace />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,

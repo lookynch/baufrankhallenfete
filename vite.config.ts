@@ -1,12 +1,12 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import { pwaManifests } from './scripts/pwa-manifests.ts';
+import { pwaEntries } from './scripts/pwa-entries.ts';
 
 export default defineConfig({
   root: 'src/client',
   publicDir: '../../public',
-  plugins: [react(), tailwindcss(), pwaManifests()],
+  plugins: [react(), tailwindcss(), pwaEntries()],
   build: {
     outDir: '../../dist',
     emptyOutDir: true,

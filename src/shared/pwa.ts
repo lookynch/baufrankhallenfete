@@ -1,11 +1,19 @@
 import { hex, theme } from './theme.ts';
 
 export const pwaApps = {
-  guest: { id: '/', scope: '/', name: theme.event.name, shortName: 'Fete' },
-  admin: { id: '/admin/', scope: '/admin/', name: `${theme.event.name} Admin`, shortName: 'Fete Admin' },
+  guest: { id: '/fete/', scope: '/fete', startUrl: '/fete/', name: theme.event.name, shortName: 'Fete' },
+  admin: {
+    id: '/admin/',
+    scope: '/admin',
+    startUrl: '/admin/',
+    name: `${theme.event.name} Admin`,
+    shortName: 'Fete Admin',
+  },
 } as const;
 
 export type PwaApp = keyof typeof pwaApps;
+
+export const guestHome = pwaApps.guest.startUrl;
 
 export const pwaIcons = [
   { name: '192', size: 192, maskable: false },
@@ -14,8 +22,12 @@ export const pwaIcons = [
   { name: 'apple-touch-icon', size: 180, maskable: false },
 ] as const;
 
-export function pwaAppFor(pathname: string): PwaApp {
-  return pathname === '/admin' || pathname.startsWith('/admin/') ? 'admin' : 'guest';
+export function pwaAppAt(pathname: string): PwaApp | null {
+  const app = (Object.keys(pwaApps) as PwaApp[]).find((key) => {
+    const scope = pwaApps[key].scope;
+    return pathname === scope || pathname.startsWith(`${scope}/`);
+  });
+  return app ?? null;
 }
 
 export function iconPath(app: PwaApp, icon: (typeof pwaIcons)[number]['name']): string {
@@ -26,6 +38,17 @@ export function manifestPath(app: PwaApp): string {
   return `/pwa/${app}.webmanifest`;
 }
 
+export function pwaHeadTags(app: PwaApp): string {
+  return [
+    `<link rel="manifest" href="${manifestPath(app)}" />`,
+    `<link rel="apple-touch-icon" href="${iconPath(app, 'apple-touch-icon')}" />`,
+    '<meta name="mobile-web-app-capable" content="yes" />',
+    '<meta name="apple-mobile-web-app-capable" content="yes" />',
+    `<meta name="apple-mobile-web-app-title" content="${pwaApps[app].shortName}" />`,
+    '<meta name="apple-mobile-web-app-status-bar-style" content="black" />',
+  ].join('\n    ');
+}
+
 export function webManifest(app: PwaApp) {
   const config = pwaApps[app];
   return {
@@ -33,7 +56,7 @@ export function webManifest(app: PwaApp) {
     name: config.name,
     short_name: config.shortName,
     lang: 'de',
-    start_url: config.scope,
+    start_url: config.startUrl,
     scope: config.scope,
     display: 'standalone',
     background_color: hex(theme.colors.background),

@@ -2,12 +2,12 @@
 
 Party-App für die Fete in der Baufrankhalle (IT Applications & Buchhaltung). Läuft komplett auf **Cloudflare Pages (Free)**: Pages Functions + D1.
 
-| Oberfläche                                                  | URL                                          | Wer                                                |
-| ----------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------- |
-| Gäste (Voting, Songwünsche)                                 | QR-Code auf dem TV → `/v/<code>`             | Alle Gäste, nur QR scannen                         |
-| TV / Bar 1 Stattrack / Bar 2 Buchhaltung / Player-Taktgeber | `/display` (Rolle wird beim Koppeln gewählt) | Bildschirme                                        |
-| Adminbereich                                                | `/admin`                                     | Orga-Team, Passkey oder Passwort + 2FA             |
-| Buzzer                                                      | PC-Agent → `/api/buzzer/*`                   | Bar-PC, siehe [`agent/README.md`](agent/README.md) |
+| Oberfläche                                                  | URL                                             | Wer                                                |
+| ----------------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------- |
+| Gäste (Voting, Songwünsche)                                 | `/fete` (QR-Code auf dem TV → `/fete/v/<code>`) | Alle Gäste, nur QR scannen                         |
+| TV / Bar 1 Stattrack / Bar 2 Buchhaltung / Player-Taktgeber | `/display` (Rolle wird beim Koppeln gewählt)    | Bildschirme                                        |
+| Adminbereich                                                | `/admin`                                        | Orga-Team, Passkey oder Passwort + 2FA             |
+| Buzzer                                                      | PC-Agent → `/api/buzzer/*`                      | Bar-PC, siehe [`agent/README.md`](agent/README.md) |
 
 ## So funktioniert der Abend
 
@@ -33,7 +33,7 @@ Restrisiko: Wer gezielt Browser oder Gerät wechselt _und_ sich neu ins Mobilfun
 
 - Eigener Account pro Admin, Einladung per Einmal-Link (24 h). Eine neue Einladung ersetzt ältere offene Einladungen desselben Benutzers. Bestehende Benutzer werden nur mit ausdrücklichem **Reset** neu eingeladen. Offene Einladungen lassen sich widerrufen, Deaktivieren widerruft sie automatisch. Deaktivierte Accounts werden durch eine Einladung nicht reaktiviert, der letzte aktive Owner kann nicht herabgestuft werden.
 - Anmeldung per **Passkey** (Face ID, Touch ID, Windows Hello, Android-Bildschirmsperre) oder per Passwort (PBKDF2 + geheimer Pepper) mit **Pflicht-TOTP** und 10 Wiederherstellungscodes. Die Methode wählt jeder beim Einlösen der Einladung bzw. beim Bootstrap; weitere Passkeys unter „Mein Konto“. Passkeys sind an `WEBAUTHN_ORIGIN` gebunden (Deploy setzt es auf `PRODUCTION_URL` bzw. `https://<projekt>.pages.dev`), auf Preview-URLs gibt es keine Passkeys.
-- Gast- und Adminbereich sind als eigene Web-Apps installierbar (Manifeste aus `src/shared/pwa.ts`, Icons in `public/pwa/`). Icons neu erzeugen: quadratische PNGs nach `assets/pwa/guest.png` und `assets/pwa/admin.png` legen, dann `node scripts/generate-icons.ts`. Das Skript schneidet 14 % pro Seite ab (eingebauter Rahmen und runde Ecken – iOS und Android maskieren selbst) und verkleinert das Motiv im maskierbaren Android-Icon auf die Sicherheitszone, der Rand wird unscharf aufgefüllt. Auf dem iPhone haben Homescreen-Apps eigene Cookies: Einladungen in Safari annehmen, danach in der App per Passkey anmelden; Spotify im Browser verbinden. Die Gast-App braucht nach dem QR-Scan (öffnet Safari) dort ein gültiges Cookie, auf dem iPhone ist sie deshalb nur eingeschränkt nützlich.
+- Gast- und Adminbereich sind als getrennte Web-Apps installierbar: Gäste unter `/fete`, Admin unter `/admin`. Die Scopes überschneiden sich nicht (`/` und alte `/v/<code>`-Links leiten per `public/_redirects` auf `/fete` um). Jede App hat eine eigene HTML-Datei mit festem Manifest (`dist/fete/index.html`, `dist/admin/index.html`, erzeugt von `scripts/pwa-entries.ts` aus `src/shared/pwa.ts`), weil iOS das Manifest beim Laden liest und spätere Änderungen ignoriert. `/display`, `/datenschutz` und `/impressum` laufen über die Root-HTML ohne Manifest. Icons liegen in `public/pwa/`. Icons neu erzeugen: quadratische PNGs nach `assets/pwa/guest.png` und `assets/pwa/admin.png` legen, dann `node scripts/generate-icons.ts`. Das Skript schneidet 14 % pro Seite ab (eingebauter Rahmen und runde Ecken – iOS und Android maskieren selbst) und verkleinert das Motiv im maskierbaren Android-Icon auf die Sicherheitszone, der Rand wird unscharf aufgefüllt. Auf dem iPhone haben Homescreen-Apps eigene Cookies: Einladungen in Safari annehmen, danach in der App per Passkey anmelden; Spotify im Browser verbinden. Die Gast-App braucht nach dem QR-Scan (öffnet Safari) dort ein gültiges Cookie, auf dem iPhone ist sie deshalb nur eingeschränkt nützlich.
 - Sessions als `__Host-` Cookies mit SameSite=Strict, Idle 2 h, maximal 12 h, ohne gespeicherte IP oder Browserkennung. CSRF-Schutz über Origin-Prüfung und Pflicht-Header.
 - Kritische Aktionen (Admins verwalten, Passkeys verwalten, Gästedaten löschen) brauchen eine **erneute Bestätigung** per Passkey oder 2FA-Code.
 - Rollen `owner` (verwaltet Admins) und `admin`.

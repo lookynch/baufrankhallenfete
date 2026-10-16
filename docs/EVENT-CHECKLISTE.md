@@ -14,7 +14,7 @@
 - [ ] Spotify-Premium des Party-Accounts läuft über das Eventdatum hinaus.
 - [ ] Spotify im Admin unter „Musik & Sets → Spotify“ **neu verbinden**: Die Freigabe gilt 6 Monate ab Verbindung.
 - [ ] Mindestens 2 Owner mit Passkey oder 2FA. Wiederherstellungscodes sicher abgelegt, Passkey-Konten möglichst mit zwei Geräten (z. B. iPhone + Laptop).
-- [ ] Adminbereich auf den Orga-Handys als App installiert (Safari: Teilen → Zum Home-Bildschirm, Android: App installieren) und dort einmal angemeldet.
+- [ ] Adminbereich auf den Orga-Handys als App installiert: `/admin` öffnen, dann Safari: Teilen → Zum Home-Bildschirm, Android: App installieren. Dort einmal angemeldet. Test-Apps von vor der Trennung in Gast- und Admin-App einmal löschen und neu hinzufügen (sie starten sonst auf der Gäste-Seite).
 - [ ] Buchhaltung hat Konten, Durchschnittspreis pro Kasten und Budget in den Einstellungen bestätigt.
 
 ## Generalprobe (mind. 1 Woche vorher, vor Ort)
