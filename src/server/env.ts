@@ -1,3 +1,4 @@
+import type { Lastfm } from './services/genres.ts';
 import type { SpotifyApi } from './services/spotify-api.ts';
 
 export interface Env {
@@ -10,6 +11,7 @@ export interface Env {
   ENC_KEY: string;
   SPOTIFY_CLIENT_ID?: string;
   SPOTIFY_CLIENT_SECRET?: string;
+  LASTFM_API_KEY?: string;
   BOOTSTRAP_TOKEN?: string;
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
@@ -24,6 +26,7 @@ export interface Runtime {
   now: () => number;
   waitUntil: (promise: Promise<unknown>) => void;
   spotify: SpotifyApi;
+  lastfm: Lastfm | null;
 }
 
 export const requiredSecrets = [

@@ -22,8 +22,16 @@ interface DashboardData {
   displays: Array<{ id: number; name: string; kind: string; last_seen_at: number | null }>;
   budget: { requestsToday: number | null; fraction: number | null; fetchedAt: number; error: string | null } | null;
   ipLimitRejections: number;
+  hiddenSearches: number;
+  genreFilter: boolean;
   emergencies: { n: number; last_at: number | null } | null;
-  counts: { devices: number; open_wishes: number; flagged_presses: number; votes: number } | null;
+  counts: {
+    devices: number;
+    open_wishes: number;
+    waiting_wishes: number;
+    flagged_presses: number;
+    votes: number;
+  } | null;
   coverage: Array<{
     setId: number;
     name: string;
@@ -59,6 +67,8 @@ export function Dashboard() {
   if (data.spotify.refreshValidUntil && data.spotify.refreshValidUntil - now < 30 * 86_400_000) {
     warnings.push('Spotify-Freigabe läuft in weniger als 30 Tagen ab – neu verbinden.');
   }
+  if (!data.genreFilter)
+    warnings.push('Genre-Filter aus: LASTFM_API_KEY fehlt. Gäste können gerade jeden Song wünschen.');
   if (!agentHealthy) warnings.push('Buzzer-PC meldet sich nicht (Heartbeat älter als 60 s).');
   if (!data.displays.some((d) => d.kind === 'tv' && d.last_seen_at && now - d.last_seen_at < 180_000))
     warnings.push('Kein TV-Display online.');
@@ -190,7 +200,16 @@ export function Dashboard() {
               value={data.ipLimitRejections}
               hint="Bei vielen: Limit in Einstellungen erhöhen"
             />
-            <Stat label="Offene Wünsche" value={data.counts?.open_wishes ?? 0} />
+            <Stat
+              label="Wünsche im Voting-Pool"
+              value={data.counts?.waiting_wishes ?? 0}
+              hint={data.counts?.open_wishes ? `${data.counts.open_wishes} warten auf Prüfung` : undefined}
+            />
+            <Stat
+              label="Suchen mit ausgeblendeten Treffern"
+              value={data.hiddenSearches}
+              hint="heute, durch den Genre-Filter"
+            />
             <Stat
               label="Notfall-Songs"
               value={data.emergencies?.n ?? 0}

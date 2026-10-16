@@ -15,19 +15,22 @@ interface Wish {
   image_url: string | null;
   explicit: number;
   mood_level: number | null;
+  auto_level: number | null;
+  blocked_tag: string | null;
+  vetoed: number;
   upvotes: number;
   decided_by_name: string | null;
 }
 
 const columns = [
+  { key: 'approved', label: 'Freigegeben, wartend' },
   { key: 'open', label: 'In Prüfung' },
-  { key: 'approved', label: 'Freigegeben' },
-  { key: 'played', label: 'Im Voting / gespielt' },
-  { key: 'rejected', label: 'Abgelehnt' },
+  { key: 'played', label: 'Gewonnen / gespielt' },
+  { key: 'rejected', label: 'Abgelehnt / Veto' },
 ] as const;
 
 export function WishesPage() {
-  const [status, setStatus] = useState<(typeof columns)[number]['key']>('open');
+  const [status, setStatus] = useState<(typeof columns)[number]['key']>('approved');
   const { data, reload } = useAdminData<{ wishes: Wish[] }>(`/api/admin/wishes?status=${status}`, 15_000);
   const sets = useAdminData<{ sets: Array<{ id: number; name: string; default_level: number; starts_at: number }> }>(
     '/api/admin/sets',
@@ -36,7 +39,7 @@ export function WishesPage() {
     <div className="flex flex-col gap-6">
       <PageTitle
         title="Songwünsche"
-        subtitle="Gäste-Tickets prüfen. Freigegebene Wünsche kommen in das gewählte Set und werden bei passender Stimmung bevorzugt zur Wahl gestellt."
+        subtitle="Wünsche, die zur Party passen, werden automatisch freigegeben und kommen ins laufende Set. Mit Veto fliegt ein Song raus und kann nicht erneut gewünscht werden. „In Prüfung“ füllt sich nur, wenn die automatische Freigabe aus ist oder kein Set existiert."
       />
       <div className="flex flex-wrap gap-2">
         {columns.map((c) => (
@@ -77,14 +80,19 @@ function WishCard({
   const { run } = useAdmin();
   const { busy, guard } = useInFlight();
   const [setId, setSetId] = useState('');
-  const [level, setLevel] = useState<number | null>(wish.mood_level);
+  const [level, setLevel] = useState<number | null>(wish.mood_level ?? wish.auto_level);
   const effectiveSetId = sets.some((s) => String(s.id) === setId) ? setId : String(sets[0]?.id ?? '');
   function decide(approve: boolean) {
+    if (
+      !approve &&
+      !confirm(`${wish.title} per Veto aussortieren? Der Song verschwindet aus Voting und Warteschlange.`)
+    )
+      return;
     return guard(approve ? 'approve' : 'reject', async () => {
       const body = approve ? { approve: true, setId: Number(effectiveSetId), level } : { approve: false };
       await run(
         () => api.post(`/api/admin/wishes/${wish.id}/decide`, body),
-        approve ? `${wish.key} freigegeben` : `${wish.key} abgelehnt`,
+        approve ? `${wish.key} freigegeben` : `${wish.key} aussortiert`,
       );
       await onDone();
     });
@@ -97,6 +105,8 @@ function WishCard({
           <div className="flex items-center gap-2">
             <span className="font-mono text-sm font-bold text-accent">{wish.key}</span>
             {wish.explicit ? <Badge tone="warning">explicit</Badge> : null}
+            {wish.blocked_tag ? <Badge tone="danger">gesperrt: {wish.blocked_tag}</Badge> : null}
+            {wish.vetoed ? <Badge tone="danger">Veto</Badge> : null}
             <span className="ml-auto text-xs text-muted">{formatTime(wish.created_at)}</span>
           </div>
           <div className="mt-1 truncate font-semibold">{wish.title}</div>
@@ -131,13 +141,28 @@ function WishCard({
               disabled={busy !== null}
               onClick={() => void decide(false)}
             >
-              Ablehnen
+              Veto
             </Button>
           </div>
         </div>
       ) : (
-        <div className="mt-3">
-          <MoodBadge level={wish.mood_level} />
+        <div className="mt-3 flex items-center gap-2">
+          <MoodBadge level={wish.mood_level ?? wish.auto_level} />
+          {wish.mood_level === null && wish.auto_level !== null ? (
+            <span className="text-xs text-muted">geschätzt</span>
+          ) : null}
+          {wish.status === 'approved' ? (
+            <Button
+              size="sm"
+              variant="danger"
+              className="ml-auto"
+              busy={busy === 'reject'}
+              disabled={busy !== null}
+              onClick={() => void decide(false)}
+            >
+              Veto
+            </Button>
+          ) : null}
         </div>
       )}
     </Card>

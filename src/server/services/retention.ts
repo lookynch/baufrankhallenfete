@@ -3,6 +3,7 @@ import { SESSION_IDLE_MS } from '../security/session.ts';
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
+const ARTIST_TAGS_DAYS = 30;
 const SQL_NOW = "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)";
 
 export function retentionStatements(now: string, purgeGuests: boolean): string[] {
@@ -15,6 +16,7 @@ export function retentionStatements(now: string, purgeGuests: boolean): string[]
     `UPDATE wishes SET device_id = 'anon' WHERE device_id <> 'anon' AND created_at <= ${guest}`,
     `UPDATE wish_upvotes SET device_id = 'anon-' || rowid, ip_key = NULL WHERE created_at <= ${guest} AND (ip_key IS NOT NULL OR device_id NOT LIKE 'anon-%')`,
     `DELETE FROM search_cache WHERE fetched_at <= ${short}`,
+    `DELETE FROM artist_tags WHERE max(fetched_at, COALESCE(failed_until, 0)) <= ${now} - ${ARTIST_TAGS_DAYS * DAY}`,
     `DELETE FROM rate_limits WHERE window_start <= ${short}`,
     `UPDATE audit_log SET ip_hash = NULL WHERE ip_hash IS NOT NULL AND at <= ${guest}`,
     `UPDATE audit_log SET after_json = json_remove(after_json, '$.ipKeyPrefix') WHERE action = 'votes_invalidate' AND at <= ${guest} AND json_extract(after_json, '$.ipKeyPrefix') IS NOT NULL`,

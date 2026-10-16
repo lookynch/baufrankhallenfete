@@ -12,18 +12,21 @@ import { buzzerRoutes } from './routes/buzzer.ts';
 import { coverRoutes } from './routes/cover.ts';
 import { displayRoutes } from './routes/display.ts';
 import { publicRoutes } from './routes/public.ts';
+import { createLastfm } from './services/genres.ts';
 import { getKv } from './services/kv.ts';
 import { createHttpSpotify } from './services/spotify-http.ts';
 
 export interface AppOptions {
   now?: () => number;
   spotify?: (env: Env, now: () => number) => Runtime['spotify'];
+  lastfm?: (env: Env) => Runtime['lastfm'];
 }
 
 export function createApp(options: AppOptions = {}) {
   const app = new Hono<AppEnv>().basePath('/api');
   const now = options.now ?? (() => Date.now());
   const spotifyFactory = options.spotify ?? createHttpSpotify;
+  const lastfmFactory = options.lastfm ?? ((env: Env) => createLastfm(env));
 
   app.use('*', async (c, next) => {
     const missing = requiredSecrets.filter((key) => !c.env[key]);
@@ -39,7 +42,13 @@ export function createApp(options: AppOptions = {}) {
     } catch {
       waitUntil = (promise) => void promise.catch((error: unknown) => console.error('background task failed', error));
     }
-    c.set('rt', { env: c.env, now, waitUntil, spotify: spotifyFactory(c.env, now) });
+    c.set('rt', {
+      env: c.env,
+      now,
+      waitUntil,
+      spotify: spotifyFactory(c.env, now),
+      lastfm: lastfmFactory(c.env),
+    });
     await next();
     for (const [name, value] of Object.entries(securityHeaders)) c.header(name, value);
     if (!c.res.headers.has('Cache-Control')) c.header('Cache-Control', 'no-store');

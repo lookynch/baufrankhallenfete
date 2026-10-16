@@ -10,6 +10,7 @@
   - `/datenschutz` und `/impressum` gegengelesen, Stand-Datum `updatedAt` in `src/shared/legal.ts` aktuell.
   - Rolle der GmbH geklärt. Nutzt sie die App mit (z. B. die Buchhaltung das Verbrauchsprotokoll) oder gibt sie Weisungen, kann sie mitverantwortlich sein. Dann auch ihren Datenschutzbeauftragten und gegebenenfalls den Betriebsrat einbinden.
   - Offene Prüfungen aus `DATENSCHUTZ.md` erledigt (D1-Standort, Cloudflare-Plan, DPF-Eintrag, Inhaber des Party-Accounts).
+- [ ] `LASTFM_API_KEY` gesetzt, sonst ist der Genre-Filter für Gästewünsche aus (Dashboard warnt).
 - [ ] `CF_ANALYTICS_TOKEN` gesetzt (dringend empfohlen). Ohne ihn drosselt der Budget-Wächter nicht, und Gäste sehen Cover auch über 80 % Budget.
 - [ ] Spotify-Premium des Party-Accounts läuft über das Eventdatum hinaus.
 - [ ] Spotify im Admin unter „Musik & Sets → Spotify“ **neu verbinden**: Die Freigabe gilt 6 Monate ab Verbindung.
@@ -48,6 +49,11 @@
 - [ ] Rund 130–180 Songs mit gepflegtem Level, keine Lücken zwischen Sets.
 - [ ] Vorprogramm-Playlist gesetzt. Die Prüfung meldet **keine Überschneidung** mit den Sets.
 - [ ] Startzeit des ersten Votings gesetzt.
+- [ ] Genre-Filter geprüft: Unter „Einstellungen → Genre-Filter“ die Sperrliste durchgesehen. In der Gäste-App gesucht:
+  - ausgeblendet: Rammstein, Slayer, Metallica, Zenek Martyniuk (Disco Polo), Kastelruther Spatzen
+  - sichtbar: AC/DC, Bon Jovi, Europe, Linkin Park, Dua Lipa, Helene Fischer
+
+  Abweichungen notieren und Sperrliste anpassen; einzelne Songs lassen sich per Import in ein Set trotzdem erlauben.
 
 ## Am Abend (vor Einlass)
 
@@ -71,7 +77,7 @@
   - IP-Ablehnungen (bei vielen das IPv4- bzw. IPv6-/48-Limit `votesPerNetV6` erhöhen)
   - Notfall-Songs
   - Requests heute
-- [ ] Songwünsche unter „Wünsche“ freigeben (Set und Level wählen).
+- [ ] Unter „Wünsche → Freigegeben, wartend“ unpassende Wünsche per **Veto** aussortieren. „In Prüfung“ füllt sich nur, wenn die automatische Freigabe aus ist oder kein Set existiert.
 - [ ] Markierte Buzzer-Drücke prüfen, Fehlbuchungen per Storno korrigieren.
 
 ## Notfall

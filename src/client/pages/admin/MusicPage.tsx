@@ -43,6 +43,9 @@ interface Song {
   duration_ms: number;
   explicit: number;
   mood_level: number | null;
+  auto_level: number | null;
+  blocked_tag: string | null;
+  vetoed: number;
   active: number;
   set_ids: number[];
   playback_status: string | null;
@@ -154,16 +157,19 @@ function Library({ sets }: { sets: SetRow[] }) {
           {data.songs.map((song) => (
             <li
               key={song.id}
-              className={`flex flex-wrap items-center gap-3 rounded-xl bg-raised/50 p-2 ${song.active ? '' : 'opacity-50'}`}
+              className={`flex flex-wrap items-center gap-3 rounded-xl bg-raised/50 p-2 ${song.active && !song.vetoed && !song.blocked_tag ? '' : 'opacity-50'}`}
             >
               <Cover src={song.image_url} size={44} />
               <div className="min-w-[12rem] flex-1">
                 <div title={song.title} className="truncate font-semibold">
                   {song.title} {song.explicit ? <Badge tone="warning">E</Badge> : null}
+                  {song.blocked_tag ? <Badge tone="danger">gesperrt: {song.blocked_tag}</Badge> : null}
+                  {song.vetoed ? <Badge tone="danger">Veto</Badge> : null}
                 </div>
                 <div title={song.artist} className="truncate text-sm text-muted">
                   {song.artist} · {song.set_ids.map((id) => setById.get(id)?.name ?? `#${id}`).join(', ') || 'kein Set'}
                   {song.playback_status ? ` · ${song.playback_status}` : ''}
+                  {song.mood_level === null && song.auto_level !== null ? ` · geschätzt Level ${song.auto_level}` : ''}
                 </div>
               </div>
               <LevelPicker
@@ -171,6 +177,11 @@ function Library({ sets }: { sets: SetRow[] }) {
                 allowNull
                 onChange={(l) => void update(song.id, { mood_level: l })}
               />
+              {song.vetoed ? (
+                <Button size="sm" variant="ghost" onClick={() => void update(song.id, { vetoed: false })}>
+                  Veto aufheben
+                </Button>
+              ) : null}
               <Button size="sm" variant="ghost" onClick={() => void update(song.id, { active: !song.active })}>
                 {song.active ? 'Sperren' : 'Freigeben'}
               </Button>
