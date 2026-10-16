@@ -2,12 +2,10 @@ import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { body, clientIp, fail, idParam, query, type AppContext, type AppEnv } from '../http.ts';
-import { sha256Hex } from '../security/crypto.ts';
 import { decodeGuest, encodeGuest, GUEST_COOKIE, newDeviceId, type GuestIdentity } from '../security/guest.ts';
 import { ipKeyHash } from '../security/ip.ts';
 import { verifyPresenceToken } from '../security/presence.ts';
 import { hitRateLimit } from '../security/ratelimit.ts';
-import { turnstileConfigured, verifyTurnstile } from '../security/turnstile.ts';
 import { readBudget, throttleFactor } from '../services/budget.ts';
 import { openRound, votingActive } from '../services/rounds.ts';
 import { loadSettings } from '../services/settings.ts';
@@ -35,7 +33,7 @@ function clientNetwork(c: AppContext) {
 async function requireGuest(c: AppContext): Promise<GuestIdentity> {
   const guest = await decodeGuest(c.env.COOKIE_SECRET, getCookie(c, GUEST_COOKIE), c.var.rt.now());
   if (!guest) fail(401, 'not_joined');
-  return { ...guest, verified: guest.verified || !turnstileConfigured(c.env) };
+  return guest;
 }
 
 async function guestPollAfterMs(c: AppContext, settings: Settings, round: RoundView | null, now: number) {
@@ -49,48 +47,26 @@ async function guestPollAfterMs(c: AppContext, settings: Settings, round: RoundV
   return MAX_GUEST_POLL_MS;
 }
 
-publicRoutes.get('/config', async (c) => {
-  const settings = await loadSettings(c.env.DB, c.var.rt.now());
-  return c.json({
-    eventName: settings.event.name,
-    turnstileSiteKey: turnstileConfigured(c.env) ? (c.env.TURNSTILE_SITE_KEY ?? null) : null,
-  });
-});
-
 publicRoutes.post('/join', async (c) => {
   const now = c.var.rt.now();
   const ip = await clientNetwork(c);
   await limit(c, 'join', 300, 600, ip.hash);
-  const input = await body(
-    c,
-    z.object({
-      token: z.string().max(16).optional(),
-      turnstile: z.string().max(4096).optional(),
-      fingerprint: z.string().max(512).optional(),
-    }),
-  );
+  const input = await body(c, z.object({ token: z.string().max(16).optional() }));
   const existing = await decodeGuest(c.env.COOKIE_SECRET, getCookie(c, GUEST_COOKIE), now);
   if (!existing) {
     if (!input.token || !(await verifyPresenceToken(c.env.QR_SECRET, input.token, now))) fail(403, 'qr_expired');
     if (ip.netHash !== ip.hash) await limit(c, 'join-net', 300, 600, ip.netHash);
   }
   const settings = await loadSettings(c.env.DB, now);
-  const verified =
-    existing?.verified === true ||
-    !turnstileConfigured(c.env) ||
-    (await verifyTurnstile(c.env.TURNSTILE_SECRET, input.turnstile, clientIp(c)));
   const identity: GuestIdentity = {
     deviceId: existing?.deviceId ?? newDeviceId(),
-    verified,
     expiresAt: Math.max(settings.event.endsAt + 6 * 3_600_000, now + 12 * 3_600_000),
   };
-  const fpHash = input.fingerprint ? (await sha256Hex(`fp:${input.fingerprint}`)).slice(0, 24) : null;
   await c.env.DB.prepare(
-    `INSERT INTO devices (id, created_at, verified, fp_hash, ip_key, last_seen_at) VALUES (?1, ?2, ?3, ?4, ?5, ?2)
-     ON CONFLICT (id) DO UPDATE SET verified = MAX(verified, excluded.verified), fp_hash = COALESCE(excluded.fp_hash, fp_hash),
-       ip_key = excluded.ip_key, last_seen_at = excluded.last_seen_at`,
+    `INSERT INTO devices (id, created_at, ip_key, last_seen_at) VALUES (?1, ?2, ?3, ?2)
+     ON CONFLICT (id) DO UPDATE SET ip_key = excluded.ip_key, last_seen_at = excluded.last_seen_at`,
   )
-    .bind(identity.deviceId, now, verified ? 1 : 0, fpHash, ip.hash)
+    .bind(identity.deviceId, now, ip.hash)
     .run();
   setCookie(c, GUEST_COOKIE, await encodeGuest(c.env.COOKIE_SECRET, identity), {
     path: '/',
@@ -99,7 +75,7 @@ publicRoutes.post('/join', async (c) => {
     sameSite: 'Lax',
     maxAge: Math.floor((identity.expiresAt - now) / 1000),
   });
-  return c.json({ joined: true, verified });
+  return c.json({ joined: true });
 });
 
 publicRoutes.get('/state', async (c) => {
@@ -111,15 +87,12 @@ publicRoutes.get('/state', async (c) => {
     return c.json({ joined: false, now, eventName: settings.event.name, pollAfterMs: MAX_GUEST_POLL_MS });
   }
   rt.waitUntil(tick(rt));
-  const verified = decoded.verified || !turnstileConfigured(c.env);
   const round = await openRound(c.env.DB);
   const snapshot = await readSnapshot(c.env.DB);
   const track = snapshot?.snapshot?.track;
   const view = round ? await roundView(c.env.DB, round, now, { includeTally: false, snapshot }) : null;
   return c.json({
     joined: true,
-    verified,
-    turnstileSiteKey: verified ? null : (c.env.TURNSTILE_SITE_KEY ?? null),
     now,
     eventName: settings.event.name,
     voting: { active: votingActive(settings, now), startsAt: settings.voting.startsAt, endsAt: settings.voting.endsAt },
@@ -138,9 +111,6 @@ publicRoutes.post('/vote', async (c) => {
   await limit(c, 'vote-ip', 60, 60, ip.hash);
   const input = await body(c, z.object({ roundId: z.number().int().positive(), songId: z.number().int().positive() }));
   const settings = await loadSettings(c.env.DB, now);
-  const device = await c.env.DB.prepare('SELECT fp_hash FROM devices WHERE id = ?1')
-    .bind(guest.deviceId)
-    .first<{ fp_hash: string | null }>();
   const outcome = await castVote(c.env.DB, settings, {
     roundId: input.roundId,
     songId: input.songId,
@@ -148,8 +118,6 @@ publicRoutes.post('/vote', async (c) => {
     ipKey: ip.hash,
     netKey: ip.netHash,
     ipFamily: ip.family,
-    verified: guest.verified,
-    fpHash: device?.fp_hash ?? null,
     now,
   });
   if (outcome === 'ok') return c.json({ ok: true, songId: input.songId });
@@ -196,7 +164,7 @@ publicRoutes.post('/wishes', async (c) => {
     return c.json(
       await createWish(c.env.DB, c.var.rt.spotify, guest.deviceId, input.uri, now, {
         ipKey: ip.hash,
-        limit: ipVoteLimit(settings, ip.family, guest.verified),
+        limit: ipVoteLimit(settings, ip.family),
       }),
     );
   } catch (error) {
@@ -213,7 +181,7 @@ publicRoutes.post('/wishes/:id/upvote', async (c) => {
   const settings = await loadSettings(c.env.DB, now);
   const ok = await upvoteWish(c.env.DB, idParam(c), guest.deviceId, now, {
     ipKey: ip.hash,
-    limit: ipVoteLimit(settings, ip.family, guest.verified),
+    limit: ipVoteLimit(settings, ip.family),
   });
   return c.json({ ok });
 });

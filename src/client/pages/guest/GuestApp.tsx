@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { Button, Notice, Spinner, useToast } from '../../components/ui.tsx';
+import { Button, Spinner, useToast } from '../../components/ui.tsx';
 import { api, ApiError } from '../../lib/api.ts';
-import { passiveFingerprint } from '../../lib/fingerprint.ts';
 import { useI18n, type MessageKey } from '../../lib/i18n.tsx';
 import { usePolling } from '../../lib/polling.ts';
 import { theme } from '../../lib/theme.ts';
-import { turnstileToken } from '../../lib/turnstile.ts';
 import { VoteTab, type GuestState } from './VoteTab.tsx';
 import { WishTab } from './WishTab.tsx';
 
@@ -19,10 +17,6 @@ export function guestErrorKey(error: unknown): MessageKey {
     if (GUEST_ERRORS.includes(error.code)) return `guest.error.${error.code}` as MessageKey;
   }
   return 'guest.error.generic';
-}
-
-async function verifyDevice(siteKey: string | null): Promise<string | undefined> {
-  return turnstileToken(siteKey).catch(() => undefined);
 }
 
 export function JoinPage() {
@@ -43,9 +37,7 @@ export function JoinPage() {
     };
     void (async () => {
       try {
-        const config = await api.get<{ turnstileSiteKey: string | null }>('/api/public/config');
-        const turnstile = await verifyDevice(config.turnstileSiteKey);
-        await api.post('/api/public/join', { token, turnstile, fingerprint: passiveFingerprint() });
+        await api.post('/api/public/join', { token });
         navigate('/', { replace: true });
       } catch (e) {
         if (e instanceof ApiError && e.code === 'qr_expired') {
@@ -139,26 +131,6 @@ export function GuestApp() {
   const toast = useToast();
   const load = useCallback(() => api.get<GuestState>('/api/public/state'), []);
   const { data, error, offline, offsetMs, refresh } = usePolling(load, { pauseHidden: true });
-  const [verifying, setVerifying] = useState(false);
-  const [verifyAttempted, setVerifyAttempted] = useState(false);
-  const autoVerified = useRef(false);
-  const siteKey = data?.joined && data.verified === false ? (data.turnstileSiteKey ?? null) : null;
-
-  const verify = useCallback(async () => {
-    if (!siteKey) return;
-    setVerifying(true);
-    const turnstile = await verifyDevice(siteKey);
-    if (turnstile) await api.post('/api/public/join', { turnstile }).catch(() => undefined);
-    await refresh();
-    setVerifying(false);
-    setVerifyAttempted(true);
-  }, [siteKey, refresh]);
-
-  useEffect(() => {
-    if (!siteKey || autoVerified.current) return;
-    autoVerified.current = true;
-    void verify();
-  }, [siteKey, verify]);
 
   if (!data && !error) {
     return (
@@ -191,14 +163,6 @@ export function GuestApp() {
         <div className="bg-warning/15 px-4 py-2 text-center text-sm text-warning">{t('guest.error.network')}</div>
       ) : null}
       <main className="mx-auto max-w-lg px-4 pt-2">
-        {siteKey && verifyAttempted && !verifying ? (
-          <div className="mb-4 flex flex-col gap-2">
-            <Notice tone="warning">{t('guest.unverified')}</Notice>
-            <Button size="sm" variant="outline" onClick={() => void verify()}>
-              {t('guest.retry')}
-            </Button>
-          </div>
-        ) : null}
         {data && tab === 'vote' ? (
           <VoteTab state={data} offsetMs={offsetMs} refresh={refresh} toast={toast.show} />
         ) : null}

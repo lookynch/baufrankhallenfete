@@ -105,6 +105,7 @@ describe('Grundlagen', () => {
     expect(res.status).toBe(200);
     expect(res.json.schemaVersion).toBe(2);
     expect(res.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");
+    expect(res.headers.get('Content-Security-Policy')).not.toContain('challenges.cloudflare.com');
     expect(res.headers.get('Cache-Control')).toBe('no-store');
     const missing = await h.client().request('GET', '/api/nope');
     expect(missing.status).toBe(404);
@@ -206,6 +207,22 @@ describe('Admin-Authentifizierung', () => {
         })
       ).status,
     ).toBe(200);
+  });
+
+  it('begrenzt Login-Versuche pro IPv6-/48 auch bei wechselnden /64', async () => {
+    const statuses = [];
+    for (let i = 0; i < 61; i++) {
+      const res = await h.client(`2001:db8:77:${i.toString(16)}::1`).request('POST', '/api/admin/auth/login', {
+        json: { username: `user${i}`, password: 'falsch-falsch-falsch' },
+      });
+      statuses.push(res.status);
+    }
+    expect(statuses.slice(0, 60).every((s) => s === 401)).toBe(true);
+    expect(statuses[60]).toBe(429);
+    const otherNet = await h.client('2001:db8:78::1').request('POST', '/api/admin/auth/login', {
+      json: { username: 'user0', password: 'falsch-falsch-falsch' },
+    });
+    expect(otherNet.status).toBe(401);
   });
 
   it('beendet Sessions nach Inaktivität', async () => {
@@ -326,14 +343,14 @@ describe('Displays und Gäste', () => {
     expect((await guest.request('POST', '/api/public/join', { json: {} })).json.error).toBe('qr_expired');
     expect((await guest.request('POST', '/api/public/join', { json: { token: 'AAAAAAAA' } })).status).toBe(403);
     const token = await presenceToken('test-qr-secret-0123456789', h.clock.time);
-    const joined = await guest.request('POST', '/api/public/join', { json: { token, fingerprint: 'ua|de|390x844' } });
-    expect(joined.json).toMatchObject({ joined: true, verified: true });
+    const joined = await guest.request('POST', '/api/public/join', { json: { token } });
+    expect(joined.json).toEqual({ joined: true });
     expect(guest.cookies.has('__Host-fete')).toBe(true);
 
     h.clock.advance(5_000);
     await guest.request('GET', '/api/public/state');
     const state = await guest.request('GET', '/api/public/state');
-    expect(state.json).toMatchObject({ verified: true, turnstileSiteKey: null });
+    expect(state.json.joined).toBe(true);
     const round = state.json.round as { id: number; candidates: Array<{ songId: number; votes?: number }> };
     expect(round.candidates.length).toBeGreaterThanOrEqual(4);
     expect(round.candidates[0]).not.toHaveProperty('votes');

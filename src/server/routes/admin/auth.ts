@@ -21,6 +21,7 @@ import {
   passwordProblem,
   verifyPassword,
 } from '../../security/password.ts';
+import { ipKeyHash } from '../../security/ip.ts';
 import { hitRateLimit } from '../../security/ratelimit.ts';
 import {
   ADMIN_COOKIE,
@@ -32,7 +33,6 @@ import {
   SESSION_ABSOLUTE_MS,
 } from '../../security/session.ts';
 import { base32Encode, generateTotpSecret, otpauthUri, verifyTotp } from '../../security/totp.ts';
-import { verifyTurnstile } from '../../security/turnstile.ts';
 import { verifyAccessJwt } from '../../security/access.ts';
 import { audit, auditStatement } from '../../services/audit.ts';
 
@@ -331,20 +331,11 @@ authRoutes.post('/invite/complete', async (c) => {
 
 authRoutes.post('/login', async (c) => {
   const now = c.var.rt.now();
-  const ipHash = await clientIpHash(c);
-  await rateLimit(c, `login-ip:${ipHash}`, 30, 900);
-  const input = await body(
-    c,
-    z.object({
-      username: z.string().trim().max(40),
-      password: z.string().max(256),
-      turnstile: z.string().max(4096).optional(),
-    }),
-  );
-  await rateLimit(c, `login:${input.username.toLowerCase()}:${ipHash}`, 5, 900);
-  if (c.env.TURNSTILE_SECRET && !(await verifyTurnstile(c.env.TURNSTILE_SECRET, input.turnstile, clientIp(c)))) {
-    fail(403, 'turnstile_failed');
-  }
+  const ip = await ipKeyHash(c.env.IP_HASH_SECRET, clientIp(c));
+  await rateLimit(c, `login-ip:${ip.hash}`, 30, 900);
+  if (ip.netHash !== ip.hash) await rateLimit(c, `login-net:${ip.netHash}`, 60, 900);
+  const input = await body(c, z.object({ username: z.string().trim().max(40), password: z.string().max(256) }));
+  await rateLimit(c, `login:${input.username.toLowerCase()}:${ip.hash}`, 5, 900);
   const iterations = iterationsFrom(c.env.PBKDF2_ITERATIONS);
   const user = await c.env.DB.prepare('SELECT * FROM admin_users WHERE username = ?1 AND disabled = 0')
     .bind(input.username)
@@ -360,7 +351,7 @@ authRoutes.post('/login', async (c) => {
       action: 'login_failed',
       entity: 'admin_user',
       entityId: user.id,
-      ipHash,
+      ipHash: ip.hash,
     });
     fail(401, 'invalid_credentials');
   }

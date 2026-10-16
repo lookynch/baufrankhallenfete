@@ -236,17 +236,12 @@ describe('Cloudflare Access', () => {
     expect((await full.client().request('GET', '/api/admin/auth/me')).json.error).toBe('access_required');
   });
 
-  it('meldet Turnstile- und Access-Konfiguration im Dashboard', async () => {
+  it('meldet die Access-Konfiguration im Dashboard', async () => {
     const h = new Harness();
     const { client: owner } = await createOwner(h);
-    expect((await owner.request('GET', '/api/admin/dashboard')).json).toMatchObject({
-      turnstileConfigured: false,
-      accessConfigured: false,
-    });
-    h.env.TURNSTILE_SECRET = 'secret';
-    expect((await owner.request('GET', '/api/admin/dashboard')).json.turnstileConfigured).toBe(false);
-    h.env.TURNSTILE_SITE_KEY = 'site';
-    expect((await owner.request('GET', '/api/admin/dashboard')).json.turnstileConfigured).toBe(true);
+    const dashboard = (await owner.request('GET', '/api/admin/dashboard')).json;
+    expect(dashboard.accessConfigured).toBe(false);
+    expect(dashboard).not.toHaveProperty('turnstileConfigured');
   });
 
   async function keyPair(kid: string) {

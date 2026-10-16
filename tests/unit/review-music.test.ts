@@ -381,8 +381,8 @@ describe('Admin-Eingriffe in Runden und Wiedergabe (#30, #31)', () => {
       .run();
     await harness.db
       .prepare(
-        `INSERT INTO votes (round_id, device_id, song_id, ip_key, verified, created_at, updated_at)
-         VALUES (?1, 'device-1', ?2, 'ip-1', 1, ?3, ?3)`,
+        `INSERT INTO votes (round_id, device_id, song_id, ip_key, created_at, updated_at)
+         VALUES (?1, 'device-1', ?2, 'ip-1', ?3, ?3)`,
       )
       .bind(round.id, candidates[0]!.song_id, harness.clock.time)
       .run();

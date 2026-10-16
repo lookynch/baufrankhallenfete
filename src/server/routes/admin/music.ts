@@ -332,11 +332,11 @@ musicRoutes.get('/rounds/current', async (c) => {
   const suspicious = round
     ? await db
         .prepare(
-          `SELECT ip_key, COUNT(*) AS devices, COUNT(DISTINCT fp_hash) AS fingerprints, SUM(verified) AS verified
+          `SELECT ip_key, COUNT(*) AS devices
            FROM votes WHERE round_id = ?1 AND invalidated = 0 GROUP BY ip_key HAVING COUNT(*) > 1 ORDER BY devices DESC LIMIT 20`,
         )
         .bind(round.id)
-        .all<{ ip_key: string; devices: number; fingerprints: number; verified: number }>()
+        .all<{ ip_key: string; devices: number }>()
     : { results: [] };
   const recent = await db
     .prepare('SELECT id, seq, status, mood_level, opened_at, closed_at FROM rounds ORDER BY seq DESC LIMIT 10')

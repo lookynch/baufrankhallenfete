@@ -4,7 +4,6 @@ import { QrCode } from '../../components/music.tsx';
 import { Button, Card, Field, Input, Notice, Spinner } from '../../components/ui.tsx';
 import { api, ApiError } from '../../lib/api.ts';
 import { theme } from '../../lib/theme.ts';
-import { turnstileToken } from '../../lib/turnstile.ts';
 import { errorMessage } from './shared.tsx';
 
 function AuthShell({ title, children }: { title: string; children: React.ReactNode }) {
@@ -37,9 +36,7 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const config = await api.get<{ turnstileSiteKey: string | null }>('/api/public/config');
-      const turnstile = await turnstileToken(config.turnstileSiteKey);
-      const result = await api.post<{ ticket: string }>('/api/admin/auth/login', { username, password, turnstile });
+      const result = await api.post<{ ticket: string }>('/api/admin/auth/login', { username, password });
       setTicket(result.ticket);
       setPassword('');
     } catch (e) {

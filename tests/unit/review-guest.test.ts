@@ -44,8 +44,6 @@ function vote(deviceId: string, ipKey: string, overrides: Partial<VoteInput> = {
     ipKey,
     netKey: ipKey,
     ipFamily: 'v6',
-    verified: true,
-    fpHash: null,
     now: 1,
     ...overrides,
   };
@@ -188,21 +186,28 @@ class Harness {
   }
 }
 
-describe('Gast-Beitritt ohne Turnstile', () => {
-  it('behandelt Gäste als verifiziert, wenn Turnstile nicht konfiguriert ist', async () => {
+describe('Gast-Beitritt', () => {
+  it('braucht nur den QR-Token und liefert keine Prüfstatus-Felder', async () => {
     const h = new Harness();
     const joined = await h.join('203.0.113.7');
-    expect(joined.json).toMatchObject({ joined: true, verified: true });
+    expect(joined.json).toEqual({ joined: true });
     const state = await h.request('203.0.113.7', joined.cookie, 'GET', '/api/public/state');
-    expect(state.json).toMatchObject({ verified: true, turnstileSiteKey: null });
+    expect(state.json.joined).toBe(true);
+    expect(state.json).not.toHaveProperty('verified');
+    expect(state.json).not.toHaveProperty('turnstileSiteKey');
   });
 
-  it('bleibt unverifiziert mit Turnstile ohne gültiges Token und liefert den Site-Key zum Nachholen', async () => {
-    const h = new Harness({ TURNSTILE_SITE_KEY: 'site', TURNSTILE_SECRET: 'secret' });
-    const joined = await h.join('203.0.113.7');
-    expect(joined.json).toMatchObject({ joined: true, verified: false });
-    const state = await h.request('203.0.113.7', joined.cookie, 'GET', '/api/public/state');
-    expect(state.json).toMatchObject({ verified: false, turnstileSiteKey: 'site' });
+  it('ignoriert Felder alter Clients und speichert keine Gerätesignatur', async () => {
+    const h = new Harness();
+    const token = await presenceToken('test-qr-secret-0123456789', h.clock.time);
+    const joined = await h.request('203.0.113.7', null, 'POST', '/api/public/join', {
+      token,
+      turnstile: 'alt',
+      fingerprint: 'ua|de|390x844',
+    });
+    expect(joined.json).toEqual({ joined: true });
+    expect(await h.env.DB.prepare('SELECT fp_hash FROM devices').first()).toEqual({ fp_hash: null });
+    expect((await h.request('203.0.113.7', null, 'GET', '/api/public/config')).status).toBe(404);
   });
 });
 

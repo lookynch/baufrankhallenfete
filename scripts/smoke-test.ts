@@ -73,10 +73,11 @@ const checks: Array<[string, () => Promise<boolean>]> = [
     async () => ((await (await fetch(`${base}/api/health`)).json()) as { schemaVersion: number }).schemaVersion === 2,
   ],
   [
-    'Startseite mit CSP aus _headers',
+    'Startseite mit CSP aus _headers, ohne Fremdskripte',
     async () => {
       const res = await fetch(`${base}/`);
-      return res.ok && (res.headers.get('content-security-policy') ?? '').includes("frame-ancestors 'none'");
+      const csp = res.headers.get('content-security-policy') ?? '';
+      return res.ok && csp.includes("frame-ancestors 'none'") && !csp.includes('challenges.cloudflare.com');
     },
   ],
   ['SPA-Fallback für /admin', async () => (await fetch(`${base}/admin`)).ok],

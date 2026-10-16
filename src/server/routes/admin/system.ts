@@ -82,7 +82,6 @@ systemRoutes.get('/dashboard', async (c) => {
     coverage: await setCoverage(db),
     stats: consumptionStats(rows, settings, now),
     settings: { voting: settings.voting, event: settings.event },
-    turnstileConfigured: Boolean(c.env.TURNSTILE_SITE_KEY && c.env.TURNSTILE_SECRET),
     accessConfigured: Boolean(c.env.ACCESS_AUD && c.env.ACCESS_TEAM_DOMAIN),
   });
 });

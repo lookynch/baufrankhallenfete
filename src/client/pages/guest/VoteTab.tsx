@@ -21,8 +21,6 @@ export interface GuestState {
   now: number;
   eventName: string;
   pollAfterMs: number;
-  verified?: boolean;
-  turnstileSiteKey?: string | null;
   voting?: { active: boolean; startsAt: number; endsAt: number | null };
   round?: { id: number; seq: number; level: number; expectedCloseAt: number; candidates: Candidate[] } | null;
   myVote?: number | null;

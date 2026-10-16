@@ -10,8 +10,6 @@ export interface Env {
   ENC_KEY: string;
   SPOTIFY_CLIENT_ID?: string;
   SPOTIFY_CLIENT_SECRET?: string;
-  TURNSTILE_SITE_KEY?: string;
-  TURNSTILE_SECRET?: string;
   BOOTSTRAP_TOKEN?: string;
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;

@@ -16,7 +16,6 @@ const messages: Record<string, string> = {
   invalid_code: 'Der Code ist ungültig oder wurde schon benutzt.',
   login_expired: 'Anmeldung abgelaufen – bitte erneut einloggen.',
   rate_limited: 'Zu viele Versuche. Bitte kurz warten.',
-  turnstile_failed: 'Bot-Prüfung fehlgeschlagen – Seite neu laden.',
   reauth_required: 'Bitte mit 2FA-Code bestätigen.',
   owner_required: 'Nur Owner dürfen das.',
   csrf_check_failed: 'Sicherheitsprüfung fehlgeschlagen – Seite neu laden.',
