@@ -559,6 +559,42 @@ describe('Spotify-Fehler in der Musikverwaltung', () => {
   });
 });
 
+describe('Manuelles Einplanen', () => {
+  async function songs(h: Harness, count: number) {
+    for (let i = 1; i <= count; i++) {
+      await h.env.DB.prepare(
+        `INSERT INTO songs (id, spotify_uri, title, artist, duration_ms, title_norm, artist_norm, created_at, active)
+         VALUES (?1, ?2, ?3, 'A', 200000, ?3, 'a', 0, ?4)`,
+      )
+        .bind(i, `spotify:track:manual${String(i).padStart(10, '0')}`, `Song ${i}`, i === count ? 0 : 1)
+        .run();
+    }
+  }
+
+  it('plant direkt nach dem zuletzt gespielten Titel ein und lehnt gesperrte Songs ab', async () => {
+    const h = new Harness();
+    const { client } = await createOwner(h);
+    await songs(h, 4);
+    const insert = (songId: number) => client.request('POST', '/api/admin/playback/insert', { json: { songId } });
+
+    expect((await insert(1)).status).toBe(200);
+    const first = await h.env.DB.prepare('SELECT seq FROM playback WHERE song_id = 1').first<{ seq: number }>();
+    expect(first?.seq).toBe(1);
+
+    await h.env.DB.batch([
+      h.env.DB.prepare("UPDATE playback SET status = 'played' WHERE song_id = 1"),
+      h.env.DB.prepare(
+        "INSERT INTO playback (seq, song_id, source, position, status, created_at) VALUES (2010, 2, 'winner', 1, 'planned', 0)",
+      ),
+    ]);
+    expect((await insert(3)).status).toBe(200);
+    const second = await h.env.DB.prepare('SELECT seq FROM playback WHERE song_id = 3').first<{ seq: number }>();
+    expect(second?.seq).toBe(2);
+
+    expect((await insert(4)).json).toEqual({ error: 'song_inactive' });
+  });
+});
+
 describe('Löschung', () => {
   it('löscht auf Wunsch die Daten des eigenen Geräts samt Cookie', async () => {
     const h = new Harness();

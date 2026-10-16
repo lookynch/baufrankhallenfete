@@ -6,7 +6,15 @@ import { moodLevelSchema } from '../../../shared/settings.ts';
 import { body, fail, idParam, query, type AppContext, type AppEnv } from '../../http.ts';
 import { randomToken, signValue, verifySignedValue } from '../../security/crypto.ts';
 import { audit } from '../../services/audit.ts';
-import { importTracks, LibraryError, listSets, saveSet, setCoverage, type SongRow } from '../../services/library.ts';
+import {
+  importTracks,
+  LibraryError,
+  listSets,
+  saveSet,
+  setCoverage,
+  setExists,
+  type SongRow,
+} from '../../services/library.ts';
 import { activeEntries, computeSchedule } from '../../services/playback.ts';
 import { finalizeRound, minCloseAt, openRound, tally, votingActive } from '../../services/rounds.ts';
 import { loadSettings } from '../../services/settings.ts';
@@ -285,9 +293,17 @@ musicRoutes.post('/sets/:setId/songs/:songId/remove', async (c) => {
 musicRoutes.post('/sets/:setId/songs/:songId/add', async (c) => {
   const setId = idParam(c, 'setId');
   const songId = idParam(c, 'songId');
-  await c.env.DB.prepare('INSERT OR IGNORE INTO set_songs (set_id, song_id, added_at) VALUES (?1, ?2, ?3)')
+  const added = await c.env.DB.prepare(
+    `INSERT OR IGNORE INTO set_songs (set_id, song_id, added_at)
+     SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM sets WHERE id = ?1) AND EXISTS (SELECT 1 FROM songs WHERE id = ?2)`,
+  )
     .bind(setId, songId, c.var.rt.now())
     .run();
+  if (added.meta.changes === 0) {
+    if (!(await setExists(c.env.DB, setId))) fail(404, 'set_not_found');
+    const song = await c.env.DB.prepare('SELECT 1 AS found FROM songs WHERE id = ?1').bind(songId).first();
+    if (!song) fail(404, 'song_not_found');
+  }
   await audit(c.env.DB, c.var.rt.now(), {
     userId: c.var.admin.userId,
     action: 'set_song_add',
@@ -503,6 +519,7 @@ musicRoutes.post('/playback/insert', async (c) => {
     .prepare(
       `SELECT
          EXISTS (SELECT 1 FROM songs WHERE id = ?1) AS known,
+         EXISTS (SELECT 1 FROM songs WHERE id = ?1 AND active = 1) AS active,
          EXISTS (
            SELECT 1 FROM playback WHERE song_id = ?1 AND status IN ('planned', 'queuing', 'queued', 'unknown', 'playing')
          ) AS scheduled,
@@ -511,19 +528,17 @@ musicRoutes.post('/playback/insert', async (c) => {
          ) AS candidate`,
     )
     .bind(songId)
-    .first<{ known: number; scheduled: number; candidate: number }>();
+    .first<{ known: number; active: number; scheduled: number; candidate: number }>();
   if (!existing?.known) fail(404, 'song_not_found');
+  if (!existing.active) fail(409, 'song_inactive');
   if (existing.scheduled) fail(409, 'song_already_scheduled');
   if (existing.candidate) fail(409, 'song_is_round_candidate');
-  const anchor = await db
-    .prepare(
-      `SELECT seq FROM playback WHERE status IN ('queuing', 'queued', 'unknown', 'playing') ORDER BY seq DESC LIMIT 1`,
-    )
-    .first<{ seq: number }>();
   const base =
-    anchor?.seq ??
-    (await db.prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM playback').first<{ seq: number }>())?.seq ??
-    0;
+    (
+      await db
+        .prepare("SELECT COALESCE(MAX(seq), 0) AS seq FROM playback WHERE status NOT IN ('planned', 'cancelled')")
+        .first<{ seq: number }>()
+    )?.seq ?? 0;
   const free = await db
     .prepare(
       `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 9)

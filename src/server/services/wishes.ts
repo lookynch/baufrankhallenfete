@@ -1,6 +1,6 @@
 import { trackIdFromUri } from '../../shared/spotify.ts';
 import { hitRateLimit } from '../security/ratelimit.ts';
-import { ensureSong, normalizeTitle } from './library.ts';
+import { ensureSong, normalizeTitle, setExists } from './library.ts';
 import type { SpotifyApi, SpotifyTrack } from './spotify-api.ts';
 
 export class WishError extends Error {}
@@ -203,24 +203,37 @@ export async function decideWish(
     .bind(wishId)
     .first<{ id: number; song_id: number; status: string }>();
   if (!wish) throw new WishError('wish_not_found');
+  if (wish.status !== 'open') throw new WishError('wish_not_open');
   if (!decision.approve) {
-    await db
-      .prepare("UPDATE wishes SET status = 'rejected', decided_at = ?2, decided_by = ?3 WHERE id = ?1")
+    const rejected = await db
+      .prepare(
+        "UPDATE wishes SET status = 'rejected', decided_at = ?2, decided_by = ?3 WHERE id = ?1 AND status = 'open'",
+      )
       .bind(wishId, now, userId)
       .run();
+    if (rejected.meta.changes !== 1) throw new WishError('wish_not_open');
     return { before: wish, after: { status: 'rejected' } };
   }
+  if (!(await setExists(db, decision.setId))) throw new WishError('set_not_found');
+  const approvedNow = "EXISTS (SELECT 1 FROM wishes WHERE id = ?3 AND status = 'approved' AND decided_at = ?4)";
   const statements = [
     db
-      .prepare("UPDATE wishes SET status = 'approved', decided_at = ?2, decided_by = ?3 WHERE id = ?1")
+      .prepare(
+        "UPDATE wishes SET status = 'approved', decided_at = ?2, decided_by = ?3 WHERE id = ?1 AND status = 'open'",
+      )
       .bind(wishId, now, userId),
     db
-      .prepare('INSERT OR IGNORE INTO set_songs (set_id, song_id, added_at) VALUES (?1, ?2, ?3)')
-      .bind(decision.setId, wish.song_id, now),
+      .prepare(`INSERT OR IGNORE INTO set_songs (set_id, song_id, added_at) SELECT ?1, ?2, ?4 WHERE ${approvedNow}`)
+      .bind(decision.setId, wish.song_id, wishId, now),
   ];
   if (decision.level !== null) {
-    statements.push(db.prepare('UPDATE songs SET mood_level = ?2 WHERE id = ?1').bind(wish.song_id, decision.level));
+    statements.push(
+      db
+        .prepare(`UPDATE songs SET mood_level = ?2 WHERE id = ?1 AND ${approvedNow}`)
+        .bind(wish.song_id, decision.level, wishId, now),
+    );
   }
-  await db.batch(statements);
+  const [approved] = await db.batch(statements);
+  if (approved?.meta.changes !== 1) throw new WishError('wish_not_open');
   return { before: wish, after: { status: 'approved', setId: decision.setId, level: decision.level } };
 }

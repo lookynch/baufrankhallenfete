@@ -317,9 +317,49 @@ describe('Songwünsche', () => {
       .first<{ mood_level: number }>();
     expect(level?.mood_level).toBe(4);
   });
+
+  it('entscheidet nur offene Wünsche und schreibt bei Fehlern nichts nebenbei', async () => {
+    const { db, spotify } = await setup();
+    const uri = (i: number) => makeTrack(i, 200_000, 'wish').uri;
+    const setId = await saveSet(db, { name: 'S', starts_at: NOW, ends_at: NOW + 3_600_000, default_level: 3 }, NOW);
+    const first = await createWish(db, spotify, 'dev-a', uri(0), NOW);
+    await decideWish(db, first.id, { approve: false }, 1, NOW);
+    const second = await createWish(db, spotify, 'dev-b', uri(0), NOW + 1);
+    expect(second.merged).toBe(false);
+
+    await expect(decideWish(db, first.id, { approve: true, setId, level: 5 }, 1, NOW + 2)).rejects.toThrow(
+      'wish_not_open',
+    );
+    await decideWish(db, second.id, { approve: true, setId, level: null }, 1, NOW + 3);
+    await expect(decideWish(db, second.id, { approve: false }, 1, NOW + 4)).rejects.toThrow('wish_not_open');
+    await expect(decideWish(db, second.id, { approve: true, setId, level: 1 }, 1, NOW + 5)).rejects.toThrow(
+      'wish_not_open',
+    );
+    const song = await db
+      .prepare('SELECT mood_level FROM songs WHERE spotify_uri = ?1')
+      .bind(uri(0))
+      .first<{ mood_level: number | null }>();
+    expect(song?.mood_level).toBeNull();
+
+    const third = await createWish(db, spotify, 'dev-c', uri(1), NOW);
+    await expect(decideWish(db, third.id, { approve: true, setId: 999, level: 4 }, 1, NOW)).rejects.toThrow(
+      'set_not_found',
+    );
+    const status = await db
+      .prepare('SELECT status FROM wishes WHERE id = ?1')
+      .bind(third.id)
+      .first<{ status: string }>();
+    expect(status?.status).toBe('open');
+  });
 });
 
 describe('Bibliothek-Import und Abdeckung', () => {
+  it('bricht den Import mit gelöschtem Set ab, ohne Songs halb anzulegen', async () => {
+    const { DB: db } = testEnv();
+    await expect(importTracks(db, [makeTrack(1)], 999, NOW)).rejects.toThrow('set_not_found');
+    expect((await db.prepare('SELECT COUNT(*) AS n FROM songs').first<{ n: number }>())?.n).toBe(0);
+  });
+
   it('importiert seitenweise, erkennt Duplikate per ISRC und berechnet die Abdeckung', async () => {
     const { DB: db } = testEnv();
     const setId = await saveSet(db, { name: 'Party', starts_at: NOW, ends_at: NOW + 3_600_000, default_level: 4 }, NOW);
