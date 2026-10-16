@@ -4,7 +4,7 @@ import { Notice } from '../../components/ui.tsx';
 import { api } from '../../lib/api.ts';
 import { useI18n } from '../../lib/i18n.tsx';
 import { formatDuration, formatTime, useNow } from '../../lib/time.ts';
-import { guestErrorKey } from './GuestApp.tsx';
+import { guestErrorKey, sessionLost } from './GuestApp.tsx';
 
 export interface Candidate {
   songId: number;
@@ -72,7 +72,7 @@ export function VoteTab({
       if (navigator.vibrate) navigator.vibrate(30);
     } catch (e) {
       setError(t(guestErrorKey(e)));
-      if (guestErrorKey(e) === 'guest.error.round_closed') void refresh();
+      if (guestErrorKey(e) === 'guest.error.round_closed' || sessionLost(e)) void refresh();
     } finally {
       setPending(null);
     }

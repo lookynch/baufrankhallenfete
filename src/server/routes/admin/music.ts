@@ -6,12 +6,33 @@ import { moodLevelSchema } from '../../../shared/settings.ts';
 import { body, fail, idParam, query, type AppContext, type AppEnv } from '../../http.ts';
 import { randomToken, signValue, verifySignedValue } from '../../security/crypto.ts';
 import { audit } from '../../services/audit.ts';
-import { importTracks, LibraryError, listSets, saveSet, setCoverage, type SongRow } from '../../services/library.ts';
+import {
+  importTracks,
+  LibraryError,
+  listSets,
+  saveSet,
+  setCoverage,
+  setExists,
+  type SongRow,
+} from '../../services/library.ts';
 import { activeEntries, computeSchedule } from '../../services/playback.ts';
 import { finalizeRound, minCloseAt, openRound, tally, votingActive } from '../../services/rounds.ts';
 import { loadSettings } from '../../services/settings.ts';
-import { authorizeUrl, authStatus, clearTokens, exchangeCode, spotifyConfigured } from '../../services/spotify-auth.ts';
-import { parseSpotifyReference, type SpotifyTrack } from '../../services/spotify-api.ts';
+import {
+  authorizeUrl,
+  authStatus,
+  clearTokens,
+  exchangeCode,
+  loadTokens,
+  rememberAccountId,
+  spotifyConfigured,
+} from '../../services/spotify-auth.ts';
+import {
+  parseSpotifyReference,
+  unsupportedSpotifyReference,
+  type SpotifyFailure,
+  type SpotifyTrack,
+} from '../../services/spotify-api.ts';
 import { readSnapshot, tick } from '../../services/tick.ts';
 import { decideWish, wishKey, WishError } from '../../services/wishes.ts';
 import { roundView, upNextView } from '../../views.ts';
@@ -22,6 +43,13 @@ const OAUTH_COOKIE = '__Host-oauth';
 
 function redirectUri(c: AppContext): string {
   return `${new URL(c.req.url).origin}/admin/spotify/callback`;
+}
+
+function spotifyFailure(status: 422 | 502, kind: SpotifyFailure, source: 'playlist' | 'other' = 'other'): never {
+  if (source === 'playlist' && (kind === 'forbidden' || kind === 'not_found')) {
+    fail(422, 'spotify_playlist_not_accessible');
+  }
+  fail(status, `spotify_${kind}`);
 }
 
 function libraryFailure(error: unknown): never {
@@ -58,14 +86,14 @@ musicRoutes.post('/spotify/callback', async (c) => {
   );
   deleteCookie(c, OAUTH_COOKIE, { path: '/', secure: true });
   if (!stored || stored.s !== input.state || stored.u !== c.var.admin.userId) fail(403, 'oauth_state_mismatch');
-  const tokens = await exchangeCode(c.env, input.code, redirectUri(c), now);
-  if (!tokens) fail(502, 'spotify_exchange_failed');
+  const exchange = await exchangeCode(c.env, input.code, redirectUri(c), now);
+  if (!exchange.ok) fail(502, `spotify_${exchange.kind}`);
   await audit(c.env.DB, now, {
     userId: c.var.admin.userId,
     action: 'spotify_connected',
-    after: { account: tokens.accountName },
+    after: { account: exchange.tokens.accountName },
   });
-  return c.json({ ok: true, accountName: tokens.accountName });
+  return c.json({ ok: true, accountName: exchange.tokens.accountName });
 });
 
 musicRoutes.post('/spotify/disconnect', async (c) => {
@@ -96,16 +124,31 @@ musicRoutes.post('/spotify/:action{skip|repeat|preshow}', async (c) => {
   return c.json(result.ok ? { ok: true } : { ok: false, error: result.kind });
 });
 
+async function spotifyAccountId(c: AppContext): Promise<string | null> {
+  const stored = (await loadTokens(c.env))?.accountId;
+  if (stored) return stored;
+  const me = await c.var.rt.spotify.me();
+  if (!me.ok || !me.value.id) return null;
+  await rememberAccountId(c.env, me.value.id, c.var.rt.now());
+  return me.value.id;
+}
+
 musicRoutes.get('/spotify/playlists', async (c) => {
   const result = await c.var.rt.spotify.myPlaylists();
-  if (!result.ok) fail(502, result.kind);
-  return c.json({ playlists: result.value });
+  if (!result.ok) spotifyFailure(502, result.kind);
+  const accountId = await spotifyAccountId(c);
+  return c.json({
+    playlists: result.value.map((p) => ({
+      ...p,
+      accessible: accountId === null ? null : p.collaborative || p.ownerId === accountId,
+    })),
+  });
 });
 
 musicRoutes.get('/spotify/search', async (c) => {
   const { q } = query(c, z.object({ q: z.string().min(2).max(100) }));
   const result = await c.var.rt.spotify.search(q);
-  if (!result.ok) fail(502, result.kind);
+  if (!result.ok) spotifyFailure(502, result.kind);
   const uris = result.value.map((t) => t.uri);
   const known = uris.length
     ? await c.env.DB.prepare(
@@ -129,18 +172,18 @@ musicRoutes.post('/library/import', async (c) => {
     }),
   );
   const ref = parseSpotifyReference(input.reference);
-  if (!ref) fail(422, 'invalid_spotify_reference');
+  if (!ref) fail(422, unsupportedSpotifyReference(input.reference) ?? 'invalid_spotify_reference');
   const spotify = c.var.rt.spotify;
   let tracks: SpotifyTrack[];
   let next: number | null = null;
   let total = 1;
   if (ref.kind === 'track') {
     const result = await spotify.track(ref.id);
-    if (!result.ok) fail(422, `spotify_${result.kind}`);
+    if (!result.ok) spotifyFailure(422, result.kind);
     tracks = [result.value];
   } else {
     const result = await spotify.playlistPage(ref.id, input.offset);
-    if (!result.ok) fail(422, `spotify_${result.kind}`);
+    if (!result.ok) spotifyFailure(422, result.kind, 'playlist');
     tracks = result.value.tracks;
     next = result.value.next;
     total = result.value.total;
@@ -250,9 +293,17 @@ musicRoutes.post('/sets/:setId/songs/:songId/remove', async (c) => {
 musicRoutes.post('/sets/:setId/songs/:songId/add', async (c) => {
   const setId = idParam(c, 'setId');
   const songId = idParam(c, 'songId');
-  await c.env.DB.prepare('INSERT OR IGNORE INTO set_songs (set_id, song_id, added_at) VALUES (?1, ?2, ?3)')
+  const added = await c.env.DB.prepare(
+    `INSERT OR IGNORE INTO set_songs (set_id, song_id, added_at)
+     SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM sets WHERE id = ?1) AND EXISTS (SELECT 1 FROM songs WHERE id = ?2)`,
+  )
     .bind(setId, songId, c.var.rt.now())
     .run();
+  if (added.meta.changes === 0) {
+    if (!(await setExists(c.env.DB, setId))) fail(404, 'set_not_found');
+    const song = await c.env.DB.prepare('SELECT 1 AS found FROM songs WHERE id = ?1').bind(songId).first();
+    if (!song) fail(404, 'song_not_found');
+  }
   await audit(c.env.DB, c.var.rt.now(), {
     userId: c.var.admin.userId,
     action: 'set_song_add',
@@ -468,6 +519,7 @@ musicRoutes.post('/playback/insert', async (c) => {
     .prepare(
       `SELECT
          EXISTS (SELECT 1 FROM songs WHERE id = ?1) AS known,
+         EXISTS (SELECT 1 FROM songs WHERE id = ?1 AND active = 1) AS active,
          EXISTS (
            SELECT 1 FROM playback WHERE song_id = ?1 AND status IN ('planned', 'queuing', 'queued', 'unknown', 'playing')
          ) AS scheduled,
@@ -476,19 +528,17 @@ musicRoutes.post('/playback/insert', async (c) => {
          ) AS candidate`,
     )
     .bind(songId)
-    .first<{ known: number; scheduled: number; candidate: number }>();
+    .first<{ known: number; active: number; scheduled: number; candidate: number }>();
   if (!existing?.known) fail(404, 'song_not_found');
+  if (!existing.active) fail(409, 'song_inactive');
   if (existing.scheduled) fail(409, 'song_already_scheduled');
   if (existing.candidate) fail(409, 'song_is_round_candidate');
-  const anchor = await db
-    .prepare(
-      `SELECT seq FROM playback WHERE status IN ('queuing', 'queued', 'unknown', 'playing') ORDER BY seq DESC LIMIT 1`,
-    )
-    .first<{ seq: number }>();
   const base =
-    anchor?.seq ??
-    (await db.prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM playback').first<{ seq: number }>())?.seq ??
-    0;
+    (
+      await db
+        .prepare("SELECT COALESCE(MAX(seq), 0) AS seq FROM playback WHERE status NOT IN ('planned', 'cancelled')")
+        .first<{ seq: number }>()
+    )?.seq ?? 0;
   const free = await db
     .prepare(
       `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 9)
@@ -563,7 +613,7 @@ musicRoutes.get('/spotify/preshow-check', async (c) => {
   const tracks: SpotifyTrack[] = [];
   for (let offset = 0, page = 0; page < 4; page++) {
     const result = await c.var.rt.spotify.playlistPage(id, offset);
-    if (!result.ok) fail(422, `spotify_${result.kind}`);
+    if (!result.ok) spotifyFailure(422, result.kind, 'playlist');
     tracks.push(...result.value.tracks);
     if (result.value.next === null) break;
     offset = result.value.next;

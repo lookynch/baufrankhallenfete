@@ -1,4 +1,4 @@
-import type { Settings } from '../../shared/settings.ts';
+import { MAX_EVENT_MS, type Settings } from '../../shared/settings.ts';
 
 export const BUCKET_MS = 15 * 60_000;
 
@@ -245,8 +245,9 @@ export interface ConsumptionStats {
 }
 
 export function consumptionStats(rows: Bucket[], settings: Settings, now: number): ConsumptionStats {
-  const start = bucketOf(Math.min(settings.event.startsAt, rows[0]?.bucket_start ?? settings.event.startsAt));
-  const end = Math.max(bucketOf(Math.min(now, settings.event.endsAt)), start);
+  const end = bucketOf(Math.min(now, settings.event.endsAt));
+  const earliest = bucketOf(Math.min(settings.event.startsAt, rows[0]?.bucket_start ?? settings.event.startsAt));
+  const start = Math.min(Math.max(earliest, end - MAX_EVENT_MS), end);
   const byStart = new Map(rows.map((r) => [r.bucket_start, r]));
   const series: ConsumptionStats['series'] = [];
   let cumulative = 0;

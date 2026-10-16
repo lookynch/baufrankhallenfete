@@ -115,6 +115,10 @@ function setSongStatements(db: D1Database, setId: number, tracks: SpotifyTrack[]
   });
 }
 
+export async function setExists(db: D1Database, setId: number): Promise<boolean> {
+  return (await db.prepare('SELECT 1 AS found FROM sets WHERE id = ?1').bind(setId).first()) !== null;
+}
+
 export async function importTracks(
   db: D1Database,
   tracks: SpotifyTrack[],
@@ -123,6 +127,7 @@ export async function importTracks(
 ): Promise<{ imported: number }> {
   if (tracks.length === 0) return { imported: 0 };
   if (tracks.length > 60) throw new LibraryError('too_many_tracks');
+  if (setId !== null && !(await setExists(db, setId))) throw new LibraryError('set_not_found');
   const statements = songUpsertStatements(db, tracks, now);
   if (setId !== null) statements.push(...setSongStatements(db, setId, tracks, now));
   await db.batch(statements);

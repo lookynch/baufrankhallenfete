@@ -494,6 +494,107 @@ describe('Budget-Wächter für Gast-Cover', () => {
   });
 });
 
+describe('Spotify-Fehler in der Musikverwaltung', () => {
+  const playlist = (id: string, ownerId: string, collaborative = false) => ({
+    uri: `spotify:playlist:${id}`,
+    id,
+    name: id,
+    trackCount: 3,
+    owner: ownerId,
+    ownerId,
+    collaborative,
+  });
+
+  it('nennt die konkrete Ursache bei Import und Suche', async () => {
+    const h = new Harness();
+    const { client } = await createOwner(h);
+    const importRef = (reference: string) =>
+      client.request('POST', '/api/admin/library/import', { json: { reference, setId: null } });
+
+    h.spotify.failWith('playlistPage', 'forbidden');
+    expect((await importRef('https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=x')).json).toEqual({
+      error: 'spotify_playlist_not_accessible',
+    });
+    h.spotify.failWith('track', 'owner_premium_required');
+    expect((await importRef('spotify:track:4uLU6hMCjMI75M1A2tKUQC')).json).toEqual({
+      error: 'spotify_owner_premium_required',
+    });
+    expect((await importRef('https://spotify.link/abcdef')).json).toEqual({ error: 'short_link_unsupported' });
+
+    h.spotify.failWith('search', 'user_not_registered');
+    const search = await client.request('GET', '/api/admin/spotify/search?q=song');
+    expect(search).toMatchObject({ status: 502, json: { error: 'spotify_user_not_registered' } });
+  });
+
+  it('markiert fremde Playlists als nicht importierbar', async () => {
+    const h = new Harness();
+    const { client } = await createOwner(h);
+    h.spotify.playlists = [playlist('eigene', 'party'), playlist('fremde', 'jemand'), playlist('gemeinsam', 'x', true)];
+    const res = await client.request('GET', '/api/admin/spotify/playlists');
+    const flags = (res.json.playlists as Array<{ id: string; accessible: boolean | null }>).map((p) => [
+      p.id,
+      p.accessible,
+    ]);
+    expect(flags).toEqual([
+      ['eigene', true],
+      ['fremde', false],
+      ['gemeinsam', true],
+    ]);
+
+    h.spotify.failWith('me', 'unknown');
+    const unknown = await client.request('GET', '/api/admin/spotify/playlists');
+    expect((unknown.json.playlists as Array<{ accessible: boolean | null }>).every((p) => p.accessible === null)).toBe(
+      true,
+    );
+  });
+
+  it('meldet Gästen eine ausgefallene Suche nicht als Rate-Limit', async () => {
+    const h = new Harness();
+    const token = await presenceToken('test-qr-secret-0123456789', h.clock.time);
+    const guest = h.client('2a02:810d:aaaa:1::7');
+    await guest.request('POST', '/api/public/join', { json: { token } });
+    h.spotify.failWith('search', 'owner_premium_required');
+    const res = await guest.request('GET', '/api/public/search?q=partysong');
+    expect(res.json).toMatchObject({ limited: false, unavailable: true, tracks: [] });
+  });
+});
+
+describe('Manuelles Einplanen', () => {
+  async function songs(h: Harness, count: number) {
+    for (let i = 1; i <= count; i++) {
+      await h.env.DB.prepare(
+        `INSERT INTO songs (id, spotify_uri, title, artist, duration_ms, title_norm, artist_norm, created_at, active)
+         VALUES (?1, ?2, ?3, 'A', 200000, ?3, 'a', 0, ?4)`,
+      )
+        .bind(i, `spotify:track:manual${String(i).padStart(10, '0')}`, `Song ${i}`, i === count ? 0 : 1)
+        .run();
+    }
+  }
+
+  it('plant direkt nach dem zuletzt gespielten Titel ein und lehnt gesperrte Songs ab', async () => {
+    const h = new Harness();
+    const { client } = await createOwner(h);
+    await songs(h, 4);
+    const insert = (songId: number) => client.request('POST', '/api/admin/playback/insert', { json: { songId } });
+
+    expect((await insert(1)).status).toBe(200);
+    const first = await h.env.DB.prepare('SELECT seq FROM playback WHERE song_id = 1').first<{ seq: number }>();
+    expect(first?.seq).toBe(1);
+
+    await h.env.DB.batch([
+      h.env.DB.prepare("UPDATE playback SET status = 'played' WHERE song_id = 1"),
+      h.env.DB.prepare(
+        "INSERT INTO playback (seq, song_id, source, position, status, created_at) VALUES (2010, 2, 'winner', 1, 'planned', 0)",
+      ),
+    ]);
+    expect((await insert(3)).status).toBe(200);
+    const second = await h.env.DB.prepare('SELECT seq FROM playback WHERE song_id = 3').first<{ seq: number }>();
+    expect(second?.seq).toBe(2);
+
+    expect((await insert(4)).json).toEqual({ error: 'song_inactive' });
+  });
+});
+
 describe('Löschung', () => {
   it('löscht auf Wunsch die Daten des eigenen Geräts samt Cookie', async () => {
     const h = new Harness();

@@ -38,6 +38,24 @@ import {
 
 export const systemRoutes = new Hono<AppEnv>();
 
+const berlinFormat = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Europe/Berlin',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+  timeZoneName: 'longOffset',
+});
+
+export function berlinTimestamp(ms: number): string {
+  const p = Object.fromEntries(berlinFormat.formatToParts(new Date(ms)).map((part) => [part.type, part.value]));
+  const offset = String(p.timeZoneName).replace('GMT', '') || '+00:00';
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}${offset}`;
+}
+
 systemRoutes.get('/dashboard', async (c) => {
   const now = c.var.rt.now();
   const db = c.env.DB;
@@ -82,7 +100,7 @@ systemRoutes.get('/dashboard', async (c) => {
     ipLimitRejections: await peekRateLimit(db, 'stat:ip_limit_rejections', 86_400, now),
     emergencies,
     counts,
-    coverage: await setCoverage(db),
+    coverage: await setCoverage(db, settings.voting),
     stats: consumptionStats(rows, settings, now),
     settings: { voting: settings.voting, event: settings.event },
     accessConfigured: Boolean(c.env.ACCESS_AUD && c.env.ACCESS_TEAM_DOMAIN),
@@ -232,8 +250,8 @@ systemRoutes.get('/ledger/export.csv', async (c) => {
   const lines = entries.map((e) =>
     [
       e.booking_no,
-      new Date(e.booked_at).toISOString(),
-      new Date(e.effective_at).toISOString(),
+      berlinTimestamp(e.booked_at),
+      berlinTimestamp(e.effective_at),
       e.kind,
       e.debit_account,
       e.credit_account,

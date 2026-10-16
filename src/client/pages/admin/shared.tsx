@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Button, Field, Input, Notice } from '../../components/ui.tsx';
+import { Button, Field, Input, Notice, Spinner } from '../../components/ui.tsx';
 import { api, ApiError } from '../../lib/api.ts';
 import { passkeysSupported, signInWithPasskey } from '../../lib/passkey.ts';
 
@@ -49,6 +49,7 @@ const messages: Record<string, string> = {
   ledger_accounts_must_differ: 'Vorrats-, Aufwands- und Verbindlichkeitskonto müssen verschieden sein.',
   unknown_ledger_account: 'Unbekanntes Konto – erst unter Buchhaltung anlegen.',
   event_end_before_start: 'Das Event-Ende muss nach dem Beginn liegen.',
+  event_too_long: 'Ein Event darf höchstens 48 Stunden dauern.',
   voting_end_before_start: 'Das Voting-Ende muss nach dem Voting-Start liegen.',
   song_already_scheduled: 'Der Song ist bereits eingeplant.',
   song_is_round_candidate: 'Der Song steht gerade zur Wahl.',
@@ -57,8 +58,25 @@ const messages: Record<string, string> = {
   cannot_disable_self: 'Du kannst dich nicht selbst deaktivieren.',
   entry_not_cancellable: 'Nur geplante Songs können entfernt werden.',
   invalid_spotify_reference: 'Kein gültiger Spotify-Link.',
+  short_link_unsupported:
+    'Kurzlinks (spotify.link) gehen nicht. In Spotify über „Teilen → Link kopieren“ den open.spotify.com-Link holen.',
+  album_link_unsupported: 'Alben lassen sich nicht importieren – einzelne Songs oder eine Playlist verwenden.',
   already_bootstrapped: 'Es gibt bereits einen Owner.',
   invalid_bootstrap_token: 'Bootstrap-Token falsch.',
+  no_neighbor: 'Der Eintrag steht schon ganz oben bzw. unten.',
+  no_slot_available: 'Hinter dem laufenden Song ist kein Platz mehr frei – bitte später erneut versuchen.',
+  song_not_found: 'Song nicht gefunden.',
+  song_inactive: 'Der Song ist gesperrt – erst in der Bibliothek wieder aktivieren.',
+  set_not_found: 'Das Set gibt es nicht mehr – Seite neu laden.',
+  wish_not_found: 'Wunsch nicht gefunden.',
+  wish_not_open: 'Der Wunsch wurde bereits entschieden.',
+  same_account: 'Soll- und Habenkonto müssen verschieden sein.',
+  unknown_account: 'Unbekanntes Konto – erst unter Buchhaltung anlegen.',
+  invalid_amount: 'Ungültiger Betrag.',
+  entry_not_found: 'Buchung nicht gefunden.',
+  invalid_query: 'Ungültige Suche – mindestens 2 und höchstens 100 Zeichen.',
+  internal_error: 'Interner Serverfehler – bitte erneut versuchen.',
+  server_not_configured: 'Server nicht konfiguriert (Secrets fehlen).',
   passkey_failed: 'Passkey konnte nicht bestätigt werden.',
   passkey_exists: 'Dieser Passkey ist bereits eingerichtet.',
   challenge_expired: 'Passkey-Anfrage abgelaufen – bitte erneut versuchen.',
@@ -67,14 +85,38 @@ const messages: Record<string, string> = {
   no_passkey: 'Für dieses Konto ist kein Passkey eingerichtet.',
 };
 
+const spotifyMessages: Record<string, string> = {
+  not_connected: 'Spotify ist nicht verbunden.',
+  no_device: 'Kein aktives Spotify-Abspielgerät.',
+  rate_limited: 'Spotify: zu viele Anfragen, bitte kurz warten.',
+  unauthorized: 'Spotify-Freigabe ungültig – unter Musik → Spotify neu verbinden.',
+  premium_required: 'Das verbundene Spotify-Konto hat kein Premium – zum Abspielen ist Premium nötig.',
+  owner_premium_required:
+    'Spotify sperrt die App: Der Inhaber der Spotify-Developer-App braucht ein aktives Premium-Abo.',
+  user_not_registered:
+    'Spotify sperrt das Konto: Im Spotify-Developer-Dashboard unter „User Management“ das verbundene Spotify-Konto eintragen.',
+  forbidden: 'Spotify verweigert den Zugriff.',
+  not_found: 'Bei Spotify nicht gefunden.',
+  playlist_not_accessible:
+    'Spotify gibt nur eigene oder kollaborative Playlists frei. Playlist in Spotify kopieren („Zu anderer Playlist hinzufügen“ → neue Playlist) und die Kopie importieren.',
+  client_error: 'Spotify hat die Anfrage abgelehnt.',
+  unknown: 'Spotify ist gerade nicht erreichbar.',
+};
+
+export function spotifyMessage(kind: string | undefined): string {
+  return (kind && spotifyMessages[kind]) ?? `Spotify-Fehler (${kind ?? 'unbekannt'}).`;
+}
+
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (messages[error.code]) return messages[error.code]!;
+    if (error.code.startsWith('spotify_')) return spotifyMessage(error.code.slice('spotify_'.length));
     if (error.code.startsWith('set_overlaps:')) return `Überschneidet sich mit Set „${error.code.slice(13)}“.`;
     if (error.code === 'invalid_input') {
       const issues = (error.details.issues as Array<{ path: string; message: string }> | undefined) ?? [];
       return `Ungültige Eingabe: ${issues.map((i) => i.path || i.message).join(', ')}`;
     }
+    if (error.status >= 500) return `Serverfehler (${error.code}) – bitte erneut versuchen.`;
     return `Fehler: ${error.code}`;
   }
   return 'Unbekannter Fehler.';
@@ -256,15 +298,22 @@ export function useInFlight() {
 }
 
 export function useAdminData<T>(path: string | null, intervalMs?: number) {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<unknown>(null);
+  const [state, setState] = useState<{ path: string | null; data: T | null; error: unknown }>({
+    path,
+    data: null,
+    error: null,
+  });
+  const latest = useRef(0);
   const reload = useCallback(async () => {
     if (!path) return;
+    const request = ++latest.current;
     try {
-      setData(await api.get<T>(path));
-      setError(null);
-    } catch (e) {
-      setError(e);
+      const data = await api.get<T>(path);
+      if (request === latest.current) setState({ path, data, error: null });
+    } catch (error) {
+      if (request === latest.current) {
+        setState((previous) => ({ path, data: previous.path === path ? previous.data : null, error }));
+      }
     }
   }, [path]);
   useEffect(() => {
@@ -275,7 +324,12 @@ export function useAdminData<T>(path: string | null, intervalMs?: number) {
     }, intervalMs);
     return () => window.clearInterval(id);
   }, [reload, intervalMs]);
-  return { data, error, reload };
+  const current = state.path === path;
+  return { data: current ? state.data : null, error: current ? state.error : null, reload };
+}
+
+export function Loading({ error }: { error: unknown }) {
+  return error ? <Notice tone="danger">{errorMessage(error)}</Notice> : <Spinner />;
 }
 
 export function PageTitle({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {

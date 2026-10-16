@@ -1,6 +1,7 @@
 import { decrypt, encrypt } from '../security/crypto.ts';
 import type { Env } from '../env.ts';
 import { deleteKv, getKv, releaseLock, setKv, tryLock } from './kv.ts';
+import { spotifyFailureKind, type SpotifyFailure } from './spotify-api.ts';
 
 export const SPOTIFY_SCOPES = [
   'user-read-currently-playing',
@@ -20,7 +21,17 @@ export interface SpotifyTokens {
   expiresAt: number;
   authorizedAt: number;
   accountName: string | null;
+  accountId?: string | null;
 }
+
+export type ExchangeResult =
+  { ok: true; tokens: SpotifyTokens } | { ok: false; kind: 'exchange_failed' | SpotifyFailure };
+
+const PROFILE_BLOCKERS: ReadonlySet<SpotifyFailure> = new Set([
+  'owner_premium_required',
+  'user_not_registered',
+  'forbidden',
+]);
 
 export interface SpotifyAuthStatus {
   configured: boolean;
@@ -82,17 +93,42 @@ interface TokenResponse {
 }
 
 async function tokenRequest(env: Env, body: URLSearchParams, fetcher: typeof fetch): Promise<TokenResponse | null> {
-  const response = await fetcher('https://accounts.spotify.com/api/token', {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${btoa(`${env.SPOTIFY_CLIENT_ID}:${env.SPOTIFY_CLIENT_SECRET}`)}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body,
-    signal: AbortSignal.timeout(8_000),
-  });
-  if (!response.ok) return null;
-  return (await response.json()) as TokenResponse;
+  try {
+    const response = await fetcher('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${btoa(`${env.SPOTIFY_CLIENT_ID}:${env.SPOTIFY_CLIENT_SECRET}`)}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body,
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!response.ok) {
+      console.warn(`spotify token request failed: ${response.status}`);
+      return null;
+    }
+    return (await response.json()) as TokenResponse;
+  } catch {
+    console.warn('spotify token request failed: network');
+    return null;
+  }
+}
+
+async function fetchProfile(
+  accessToken: string,
+  fetcher: typeof fetch,
+): Promise<{ ok: true; id: string | null; name: string | null } | { ok: false; kind: SpotifyFailure }> {
+  try {
+    const response = await fetcher('https://api.spotify.com/v1/me', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!response.ok) return { ok: false, kind: spotifyFailureKind(response.status, await response.text()) };
+    const profile = (await response.json()) as { display_name?: string; id?: string };
+    return { ok: true, id: profile.id ?? null, name: profile.display_name ?? null };
+  } catch {
+    return { ok: false, kind: 'unknown' };
+  }
 }
 
 export async function exchangeCode(
@@ -101,28 +137,30 @@ export async function exchangeCode(
   redirectUri: string,
   now: number,
   fetcher: typeof fetch = fetch,
-): Promise<SpotifyTokens | null> {
+): Promise<ExchangeResult> {
   const result = await tokenRequest(
     env,
     new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri }),
     fetcher,
   );
-  if (!result?.access_token || !result.refresh_token) return null;
-  let accountName: string | null = null;
-  const profile = await fetcher('https://api.spotify.com/v1/me', {
-    headers: { Authorization: `Bearer ${result.access_token}` },
-    signal: AbortSignal.timeout(8_000),
-  });
-  if (profile.ok) accountName = ((await profile.json()) as { display_name?: string; id?: string }).display_name ?? null;
+  if (!result?.access_token || !result.refresh_token) return { ok: false, kind: 'exchange_failed' };
+  const profile = await fetchProfile(result.access_token, fetcher);
+  if (!profile.ok && PROFILE_BLOCKERS.has(profile.kind)) return { ok: false, kind: profile.kind };
   const tokens: SpotifyTokens = {
     accessToken: result.access_token,
     refreshToken: result.refresh_token,
     expiresAt: now + (result.expires_in ?? 3600) * 1000,
     authorizedAt: now,
-    accountName,
+    accountName: profile.ok ? profile.name : null,
+    accountId: profile.ok ? profile.id : null,
   };
   await storeTokens(env, tokens, now);
-  return tokens;
+  return { ok: true, tokens };
+}
+
+export async function rememberAccountId(env: Env, accountId: string, now: number): Promise<void> {
+  const tokens = await loadTokens(env);
+  if (tokens) await storeTokens(env, { ...tokens, accountId }, now);
 }
 
 export async function validAccessToken(env: Env, now: number, fetcher: typeof fetch = fetch): Promise<string | null> {

@@ -1,6 +1,6 @@
 import { trackIdFromUri } from '../../shared/spotify.ts';
 import { hitRateLimit } from '../security/ratelimit.ts';
-import { ensureSong, normalizeTitle } from './library.ts';
+import { ensureSong, normalizeTitle, setExists } from './library.ts';
 import type { SpotifyApi, SpotifyTrack } from './spotify-api.ts';
 
 export class WishError extends Error {}
@@ -30,22 +30,33 @@ export async function searchTracks(
   spotify: SpotifyApi,
   query: string,
   now: number,
-): Promise<{ tracks: SpotifyTrack[]; limited: boolean }> {
+): Promise<{ tracks: SpotifyTrack[]; limited: boolean; unavailable: boolean }> {
   const normalized = normalizeQuery(query);
-  if (normalized.length < 3) return { tracks: [], limited: false };
+  if (normalized.length < 3) return { tracks: [], limited: false, unavailable: false };
   const cached = await db
     .prepare('SELECT results, fetched_at FROM search_cache WHERE query = ?1')
     .bind(normalized)
     .first<{ results: string; fetched_at: number }>();
   if (cached && now - cached.fetched_at < SEARCH_CACHE_MS) {
-    return { tracks: JSON.parse(cached.results) as SpotifyTrack[], limited: false };
+    return { tracks: JSON.parse(cached.results) as SpotifyTrack[], limited: false, unavailable: false };
   }
   const budget = await hitRateLimit(db, 'spotify:search', GLOBAL_SEARCH_LIMIT, GLOBAL_SEARCH_WINDOW_S, now);
   if (!budget.allowed) {
-    return { tracks: cached ? (JSON.parse(cached.results) as SpotifyTrack[]) : [], limited: !cached };
+    return {
+      tracks: cached ? (JSON.parse(cached.results) as SpotifyTrack[]) : [],
+      limited: !cached,
+      unavailable: false,
+    };
   }
   const result = await spotify.search(query.slice(0, 100));
-  if (!result.ok) return { tracks: cached ? (JSON.parse(cached.results) as SpotifyTrack[]) : [], limited: true };
+  if (!result.ok) {
+    const rateLimited = result.kind === 'rate_limited';
+    return {
+      tracks: cached ? (JSON.parse(cached.results) as SpotifyTrack[]) : [],
+      limited: !cached && rateLimited,
+      unavailable: !cached && !rateLimited,
+    };
+  }
   await db
     .prepare(
       `INSERT INTO search_cache (query, results, fetched_at) VALUES (?1, ?2, ?3)
@@ -53,7 +64,7 @@ export async function searchTracks(
     )
     .bind(normalized, JSON.stringify(result.value), now)
     .run();
-  return { tracks: result.value, limited: false };
+  return { tracks: result.value, limited: false, unavailable: false };
 }
 
 async function trackFromCache(db: D1Database, uri: string): Promise<SpotifyTrack | null> {
@@ -192,24 +203,37 @@ export async function decideWish(
     .bind(wishId)
     .first<{ id: number; song_id: number; status: string }>();
   if (!wish) throw new WishError('wish_not_found');
+  if (wish.status !== 'open') throw new WishError('wish_not_open');
   if (!decision.approve) {
-    await db
-      .prepare("UPDATE wishes SET status = 'rejected', decided_at = ?2, decided_by = ?3 WHERE id = ?1")
+    const rejected = await db
+      .prepare(
+        "UPDATE wishes SET status = 'rejected', decided_at = ?2, decided_by = ?3 WHERE id = ?1 AND status = 'open'",
+      )
       .bind(wishId, now, userId)
       .run();
+    if (rejected.meta.changes !== 1) throw new WishError('wish_not_open');
     return { before: wish, after: { status: 'rejected' } };
   }
+  if (!(await setExists(db, decision.setId))) throw new WishError('set_not_found');
+  const approvedNow = "EXISTS (SELECT 1 FROM wishes WHERE id = ?3 AND status = 'approved' AND decided_at = ?4)";
   const statements = [
     db
-      .prepare("UPDATE wishes SET status = 'approved', decided_at = ?2, decided_by = ?3 WHERE id = ?1")
+      .prepare(
+        "UPDATE wishes SET status = 'approved', decided_at = ?2, decided_by = ?3 WHERE id = ?1 AND status = 'open'",
+      )
       .bind(wishId, now, userId),
     db
-      .prepare('INSERT OR IGNORE INTO set_songs (set_id, song_id, added_at) VALUES (?1, ?2, ?3)')
-      .bind(decision.setId, wish.song_id, now),
+      .prepare(`INSERT OR IGNORE INTO set_songs (set_id, song_id, added_at) SELECT ?1, ?2, ?4 WHERE ${approvedNow}`)
+      .bind(decision.setId, wish.song_id, wishId, now),
   ];
   if (decision.level !== null) {
-    statements.push(db.prepare('UPDATE songs SET mood_level = ?2 WHERE id = ?1').bind(wish.song_id, decision.level));
+    statements.push(
+      db
+        .prepare(`UPDATE songs SET mood_level = ?2 WHERE id = ?1 AND ${approvedNow}`)
+        .bind(wish.song_id, decision.level, wishId, now),
+    );
   }
-  await db.batch(statements);
+  const [approved] = await db.batch(statements);
+  if (approved?.meta.changes !== 1) throw new WishError('wish_not_open');
   return { before: wish, after: { status: 'approved', setId: decision.setId, level: decision.level } };
 }

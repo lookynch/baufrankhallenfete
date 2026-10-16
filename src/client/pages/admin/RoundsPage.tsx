@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Cover, MoodBadge } from '../../components/music.tsx';
-import { Badge, Button, Card, Empty, Input, Spinner } from '../../components/ui.tsx';
+import { Badge, Button, Card, Empty, Input } from '../../components/ui.tsx';
 import { api } from '../../lib/api.ts';
 import { formatDuration, formatTime, useNow } from '../../lib/time.ts';
-import { LevelPicker, PageTitle, useAdmin, useAdminData, useInFlight } from './shared.tsx';
+import { LevelPicker, Loading, PageTitle, useAdmin, useAdminData, useInFlight } from './shared.tsx';
 
 interface RoundsData {
   round: {
@@ -52,15 +52,16 @@ export function RoundsPage() {
   const { run, notify } = useAdmin();
   const { busy, guard } = useInFlight();
   const now = useNow(1000);
-  const { data, reload } = useAdminData<RoundsData>('/api/admin/rounds/current', 8_000);
+  const { data, error, reload } = useAdminData<RoundsData>('/api/admin/rounds/current', 8_000);
   const settings = useAdminData<Settings>('/api/admin/settings');
   const [songQuery, setSongQuery] = useState('');
   const [songResults, setSongResults] = useState<
     Array<{ id: number; title: string; artist: string; image_url: string | null }>
   >([]);
 
-  if (!data) return <Spinner />;
+  if (!data) return <Loading error={error} />;
   const round = data.round;
+  const planned = data.schedule.filter((e) => e.status === 'planned');
 
   function act(path: string, body: unknown = {}, success = 'Erledigt') {
     return guard(path, async () => {
@@ -241,7 +242,7 @@ export function RoundsPage() {
                     <Button
                       size="sm"
                       variant="ghost"
-                      disabled={busy !== null}
+                      disabled={busy !== null || planned[0]?.id === e.id}
                       onClick={() => void act(`/api/admin/playback/${e.id}/move`, { direction: 'up' })}
                       aria-label="Nach oben"
                     >
@@ -250,7 +251,7 @@ export function RoundsPage() {
                     <Button
                       size="sm"
                       variant="ghost"
-                      disabled={busy !== null}
+                      disabled={busy !== null || planned.at(-1)?.id === e.id}
                       onClick={() => void act(`/api/admin/playback/${e.id}/move`, { direction: 'down' })}
                       aria-label="Nach unten"
                     >
@@ -281,6 +282,7 @@ export function RoundsPage() {
           >
             <Input
               placeholder="Titel oder Künstler aus der Bibliothek"
+              maxLength={100}
               value={songQuery}
               onChange={(e) => setSongQuery(e.target.value)}
             />

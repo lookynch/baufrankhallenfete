@@ -221,6 +221,7 @@ describe('CSV-Export', () => {
     const csv = String((await owner.request('GET', '/api/admin/ledger/export.csv')).json.text);
     expect(csv).toContain(';-1;');
     expect(csv).toContain(";'-Kasten;");
+    expect(csv).toMatch(/;\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+0[12]:00;/);
   });
 });
 
