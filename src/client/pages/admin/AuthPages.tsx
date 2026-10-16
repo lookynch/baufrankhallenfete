@@ -4,6 +4,7 @@ import { QrCode } from '../../components/music.tsx';
 import { Button, Card, Field, Input, Notice, Spinner } from '../../components/ui.tsx';
 import { api, ApiError } from '../../lib/api.ts';
 import { theme } from '../../lib/theme.ts';
+import { LegalLinks } from '../legal/LegalPages.tsx';
 import { errorMessage } from './shared.tsx';
 
 function AuthShell({ title, children }: { title: string; children: React.ReactNode }) {
@@ -18,6 +19,9 @@ function AuthShell({ title, children }: { title: string; children: React.ReactNo
           </div>
         </div>
         <Card title={title}>{children}</Card>
+        <div className="mt-4">
+          <LegalLinks admin />
+        </div>
       </div>
     </main>
   );
@@ -241,6 +245,13 @@ export function InvitePage() {
           <p className="text-sm text-muted">
             Hallo <strong className="text-fg">{info.displayName}</strong>! Dein Benutzername ist{' '}
             <strong className="font-mono text-fg">{info.username}</strong> ({info.role}).
+          </p>
+          <p className="text-sm text-muted">
+            Welche Daten der Adminbereich über dich speichert, steht in den{' '}
+            <a href="/datenschutz#admin" target="_blank" className="text-accent underline">
+              Datenschutzhinweisen für Admins
+            </a>
+            .
           </p>
           <Field label="Neues Passwort" hint="Mindestens 12 Zeichen, gerne ein Satz.">
             <Input

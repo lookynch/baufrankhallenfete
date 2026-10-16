@@ -13,5 +13,6 @@ export const legal = {
     web: 'https://www.lda.bayern.de',
   },
   updatedAt: '2026-10-16',
-  retention: { guestDays: 7, shortHours: 24, auditDays: 90, adminDays: 90, cookieMaxHours: 24 },
+  retention: { guestDays: 7, shortHours: 24, auditDays: 90, adminDays: 90, cookieMaxHours: 24, restoreDays: 7 },
+  cookies: { adminHours: 12, adminIdleHours: 2, oauthMinutes: 10, displayDays: 60 },
 } as const;

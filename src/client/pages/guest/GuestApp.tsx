@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { Button, Spinner, useToast } from '../../components/ui.tsx';
+import { Button, LanguageSwitch, Spinner, useToast } from '../../components/ui.tsx';
 import { api, ApiError } from '../../lib/api.ts';
 import { useI18n, type MessageKey } from '../../lib/i18n.tsx';
 import { usePolling } from '../../lib/polling.ts';
 import { theme } from '../../lib/theme.ts';
+import { legal } from '../../../shared/legal.ts';
+import { LegalLinks } from '../legal/LegalPages.tsx';
 import { VoteTab, type GuestState } from './VoteTab.tsx';
 import { WishTab } from './WishTab.tsx';
 
@@ -90,11 +92,18 @@ export function JoinPage() {
   );
 }
 
+const privacyParams = { name: legal.controller.name, days: legal.retention.guestDays };
+
 function CenteredMessage({ children }: { children: React.ReactNode }) {
+  const { t } = useI18n();
   return (
     <main className="bg-party flex min-h-dvh flex-col items-center justify-center gap-5 px-6 text-center">
       <img src={theme.event.logo} alt="" className="h-16 w-16" />
       {children}
+      <footer className="mt-6 flex max-w-sm flex-col gap-2 text-xs leading-relaxed text-muted/80">
+        <p>{t('privacy.short', privacyParams)}</p>
+        <LegalLinks />
+      </footer>
     </main>
   );
 }
@@ -107,30 +116,22 @@ function ScanIcon() {
   );
 }
 
-function LanguageSwitch() {
-  const { lang, setLang } = useI18n();
-  return (
-    <div className="flex rounded-full bg-raised p-1 text-xs font-semibold ring-1 ring-line">
-      {(['de', 'en'] as const).map((l) => (
-        <button
-          key={l}
-          type="button"
-          onClick={() => setLang(l)}
-          className={`rounded-full px-3 py-1 uppercase ${lang === l ? 'bg-primary text-on-primary' : 'text-muted'}`}
-        >
-          {l}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 export function GuestApp() {
   const { t } = useI18n();
   const [tab, setTab] = useState<'vote' | 'wish'>('vote');
   const toast = useToast();
   const load = useCallback(() => api.get<GuestState>('/api/public/state'), []);
   const { data, error, offline, offsetMs, refresh } = usePolling(load, { pauseHidden: true });
+
+  async function forget() {
+    if (!confirm(t('privacy.forget.confirm'))) return;
+    try {
+      await api.post('/api/public/forget');
+    } catch (e) {
+      if (!(e instanceof ApiError && e.status === 401)) return toast.show(t(guestErrorKey(e)), 'danger');
+    }
+    await refresh();
+  }
 
   if (!data && !error) {
     return (
@@ -167,7 +168,17 @@ export function GuestApp() {
           <VoteTab state={data} offsetMs={offsetMs} refresh={refresh} toast={toast.show} />
         ) : null}
         {tab === 'wish' ? <WishTab toast={toast.show} /> : null}
-        <p className="mt-10 text-center text-xs leading-relaxed text-muted/80">{t('privacy.note')}</p>
+        <footer className="mt-10 flex flex-col items-center gap-3 text-center text-xs leading-relaxed text-muted/80">
+          <p>{t('privacy.note', privacyParams)}</p>
+          <LegalLinks />
+          <button
+            type="button"
+            onClick={() => void forget()}
+            className="text-muted underline underline-offset-2 hover:text-fg"
+          >
+            {t('privacy.forget')}
+          </button>
+        </footer>
       </main>
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-line/60 bg-bg/90 px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
         <div className="mx-auto grid max-w-lg grid-cols-2 gap-2">

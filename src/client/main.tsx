@@ -11,6 +11,7 @@ import { AdminApp } from './pages/admin/AdminApp.tsx';
 import { BootstrapPage, InvitePage, SpotifyCallbackPage } from './pages/admin/AuthPages.tsx';
 import { DisplayApp } from './pages/display/DisplayApp.tsx';
 import { GuestApp, JoinPage } from './pages/guest/GuestApp.tsx';
+import { ImprintPage, PrivacyPage } from './pages/legal/LegalPages.tsx';
 
 applyTheme();
 
@@ -42,9 +43,46 @@ createRoot(document.getElementById('root')!).render(
             </I18nProvider>
           }
         />
-        <Route path="/admin/invite" element={<InvitePage />} />
-        <Route path="/admin/bootstrap" element={<BootstrapPage />} />
-        <Route path="/admin/spotify/callback" element={<SpotifyCallbackPage />} />
+        <Route
+          path="/datenschutz"
+          element={
+            <I18nProvider>
+              <PrivacyPage />
+            </I18nProvider>
+          }
+        />
+        <Route
+          path="/impressum"
+          element={
+            <I18nProvider>
+              <ImprintPage />
+            </I18nProvider>
+          }
+        />
+        <Route
+          path="/admin/invite"
+          element={
+            <I18nProvider fixed="de">
+              <InvitePage />
+            </I18nProvider>
+          }
+        />
+        <Route
+          path="/admin/bootstrap"
+          element={
+            <I18nProvider fixed="de">
+              <BootstrapPage />
+            </I18nProvider>
+          }
+        />
+        <Route
+          path="/admin/spotify/callback"
+          element={
+            <I18nProvider fixed="de">
+              <SpotifyCallbackPage />
+            </I18nProvider>
+          }
+        />
         <Route
           path="/admin/*"
           element={

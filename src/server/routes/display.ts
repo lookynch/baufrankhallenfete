@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { z } from 'zod';
+import { legal } from '../../shared/legal.ts';
 import type { Settings } from '../../shared/settings.ts';
 import { body, clientIpHash, fail, type AppContext, type AppEnv } from '../http.ts';
 import { presenceToken } from '../security/presence.ts';
@@ -45,7 +46,7 @@ displayRoutes.post('/pair/poll', async (c) => {
     secure: true,
     httpOnly: true,
     sameSite: 'Strict',
-    maxAge: 60 * 24 * 3600,
+    maxAge: legal.cookies.displayDays * 24 * 3600,
   });
   return c.json({ status: 'paired', kind: result.kind });
 });

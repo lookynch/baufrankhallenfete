@@ -1,8 +1,10 @@
+import { legal } from '../../shared/legal.ts';
 import { randomToken, sha256Hex } from './crypto.ts';
 
+const HOUR = 3_600_000;
 export const ADMIN_COOKIE = '__Host-admin';
-export const SESSION_IDLE_MS = 2 * 3_600_000;
-export const SESSION_ABSOLUTE_MS = 12 * 3_600_000;
+export const SESSION_IDLE_MS = legal.cookies.adminIdleHours * HOUR;
+export const SESSION_ABSOLUTE_MS = legal.cookies.adminHours * HOUR;
 export const REAUTH_WINDOW_MS = 15 * 60_000;
 const LAST_SEEN_RESOLUTION_MS = 5 * 60_000;
 

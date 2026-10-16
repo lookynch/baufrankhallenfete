@@ -82,6 +82,10 @@ const checks: Array<[string, () => Promise<boolean>]> = [
     },
   ],
   ['SPA-Fallback für /admin', async () => (await fetch(`${base}/admin`)).ok],
+  [
+    'SPA-Fallback für /datenschutz und /impressum',
+    async () => (await fetch(`${base}/datenschutz`)).ok && (await fetch(`${base}/impressum`)).ok,
+  ],
   ['Cover-Proxy mit ungültiger ID → 404', async () => (await fetch(`${base}/api/cover/abc`)).status === 404],
   ['Display ohne Kopplung → 401', async () => (await fetch(`${base}/api/display/state`)).status === 401],
   ['Admin ohne Login → 401', async () => (await fetch(`${base}/api/admin/auth/me`)).status === 401],

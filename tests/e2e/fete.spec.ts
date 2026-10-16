@@ -87,6 +87,7 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser, ba
 
   await admin.goto(inviteLink!);
   await expect(admin.getByText('Admin-Zugang einrichten')).toBeVisible();
+  await expect(admin.locator('a[href="/datenschutz#admin"]').first()).toBeVisible();
   const secret = (await admin.locator('code').innerText()).trim();
   await admin.getByLabel('Neues Passwort').fill('Grüne Gurken tanzen Samba 7');
   await admin.getByLabel('Passwort wiederholen').fill('Grüne Gurken tanzen Samba 7');
@@ -98,6 +99,7 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser, ba
   await expect(admin.getByText('Wiederherstellungscodes sichern')).toBeVisible();
   await admin.getByRole('button', { name: /Codes gesichert/ }).click();
   await expect(admin.getByRole('heading', { name: 'Übersicht' })).toBeVisible();
+  await expect(admin.locator('aside a[href="/datenschutz#admin"]')).toBeVisible();
 
   const voting = await adminFetch(admin, 'PUT', '/api/admin/settings/voting', {
     startsAt: now - 60_000,
@@ -129,6 +131,7 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser, ba
   await expect(qr).toBeVisible({ timeout: 30_000 });
   await expect(tv.getByText(/Runde 1/)).toBeVisible({ timeout: 30_000 });
   await expect(tv.locator('img[src^="/api/cover/"]').first()).toBeVisible();
+  await expect(tv.getByText(/^Datenschutz & Impressum: .+\/datenschutz$/)).toBeVisible();
   const qrUrl = await qr.getAttribute('data-qr-url');
   expect(qrUrl).toMatch(/\/v\/[A-Z2-7]{8}$/);
 
@@ -153,10 +156,17 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser, ba
   await expect(guest.getByText('✓ Deine Stimme')).toBeVisible();
   await guest.getByRole('button', { name: /Wunsch/ }).click();
   await expect(guest.getByText('Dein Songwunsch')).toBeVisible();
+  await expect(guest.getByRole('link', { name: 'Datenschutz' })).toBeVisible();
+  await expect(guest.getByRole('link', { name: 'Impressum' })).toBeVisible();
   await guest.screenshot({ path: join(shots, 'guest-wish.png'), fullPage: true });
 
   await expect(tv.getByText('Stimmen: 1')).toBeVisible({ timeout: 30_000 });
   await tv.screenshot({ path: join(shots, 'tv.png') });
+
+  guest.once('dialog', (dialog) => void dialog.accept());
+  await guest.getByRole('button', { name: 'Meine Daten auf diesem Gerät löschen' }).click();
+  await expect(guest.getByText('Scanne den QR-Code am Bildschirm')).toBeVisible();
+  expect((await guestContext.cookies()).map((cookie) => cookie.name)).not.toContain('__Host-fete');
 
   await admin.goto('/admin/ledger');
   await admin.getByRole('button', { name: /buchen/ }).click();
@@ -203,6 +213,43 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser, ba
 
   expect(cspErrors).toEqual([]);
   expect(requests.some((url) => url.includes('/api/cover/'))).toBe(true);
+  const origin = new URL(baseURL!).origin;
+  expect(requests.filter((url) => /^https?:/.test(url) && new URL(url).origin !== origin)).toEqual([]);
+});
+
+test('Rechtsseiten: Links, Inhalte, Sprache und Anker ohne API-Aufrufe', async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ locale: 'de-DE' });
+  await watchNetwork(context);
+  const apiCalls: string[] = [];
+  context.on('request', (request) => {
+    if (new URL(request.url()).pathname.startsWith('/api/')) apiCalls.push(request.url());
+  });
+  const page = await context.newPage();
+  watchConsole(page);
+
+  await page.goto('/datenschutz#admin');
+  await expect(page.getByRole('heading', { name: 'Datenschutzerklärung' })).toBeVisible();
+  await expect(page.locator('#admin')).toBeInViewport();
+  await expect(page.getByText('Jakob Kaiser').first()).toBeAttached();
+  await page.getByRole('button', { name: /^en$/i }).click();
+  await expect(page.getByRole('heading', { name: 'Privacy policy' })).toBeVisible();
+  await page.getByRole('button', { name: /^de$/i }).click();
+  await page.getByRole('link', { name: 'Impressum' }).click();
+  await expect(page).toHaveURL(/\/impressum$/);
+  await expect(page.getByText('Altentrüdingen 48')).toBeVisible();
+  await page.getByRole('button', { name: 'Zurück' }).click();
+  await expect(page).toHaveURL(/\/datenschutz#admin$/);
+  expect(apiCalls).toEqual([]);
+
+  await page.goto('/');
+  await expect(page.getByText('Scanne den QR-Code am Bildschirm')).toBeVisible();
+  await expect(page.getByText(/^Privat betrieben von Jakob Kaiser\./)).toBeVisible();
+  await page.getByRole('link', { name: 'Datenschutz' }).click();
+  await expect(page).toHaveURL(/\/datenschutz$/);
+  await expect(page.getByText('Widerspruchsrecht nach Art. 21 DSGVO')).toBeVisible();
+  await page.screenshot({ path: join(shots, 'datenschutz.png'), fullPage: true });
+
+  expect(cspErrors).toEqual([]);
   const origin = new URL(baseURL!).origin;
   expect(requests.filter((url) => /^https?:/.test(url) && new URL(url).origin !== origin)).toEqual([]);
 });

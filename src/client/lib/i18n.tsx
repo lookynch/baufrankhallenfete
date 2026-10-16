@@ -46,8 +46,16 @@ const de = {
   'status.approved': 'Freigegeben',
   'status.rejected': 'Abgelehnt',
   'status.played': 'Im Voting',
+  'privacy.short':
+    'Privat betrieben von {name}. Zum Mitmachen speichern wir ein Geräte-Cookie und einen pseudonymisierten Netz-Schlüssel. Daten deines Geräts löschen wir spätestens {days} Tage nach deiner letzten Aktivität.',
   'privacy.note':
-    'Datenschutz: Zum Schutz vor Mehrfachabstimmung speichern wir eine zufällige Geräte-ID und einen anonymisierten Netz-Schlüssel. Daten werden nach der Fete gelöscht.',
+    'Datenschutz: {name} betreibt diese App privat. Damit jedes Gerät nur einmal pro Runde abstimmt, speichern wir eine zufällige Geräte-ID im Cookie und einen pseudonymisierten Netz-Schlüssel, der aus deiner IP-Adresse berechnet wird. Stimmen und Geräte-Daten löschen wir spätestens {days} Tage nach deiner letzten Aktivität, Wünsche werden dann anonymisiert. Details, deine Rechte und dein Widerspruchsrecht stehen in der Datenschutzerklärung.',
+  'privacy.forget': 'Meine Daten auf diesem Gerät löschen',
+  'privacy.forget.confirm':
+    'Deine Stimmen, deine Geräte-ID und das Cookie werden sofort gelöscht, deine Wünsche anonymisiert. Zum Mitmachen musst du danach den QR-Code neu scannen. Fortfahren?',
+  'legal.privacy': 'Datenschutz',
+  'legal.imprint': 'Impressum',
+  'legal.back': 'Zurück',
   'mood.1': 'Chill',
   'mood.2': 'Warm',
   'mood.3': 'Groove',
@@ -67,6 +75,7 @@ const de = {
   'tv.noMusic': 'Musik startet gleich',
   'tv.upNextEmpty': 'Hier erscheinen die Gewinner-Songs der Runde.',
   'tv.more': '+{count} weitere Songs zur Wahl',
+  'tv.privacy': 'Datenschutz & Impressum: {host}/datenschutz',
   'display.pair.title': 'Bildschirm koppeln',
   'display.pair.text': 'Im Adminbereich unter „Displays“ diesen Code eingeben und die Rolle des Bildschirms wählen.',
   'display.pair.expired': 'Code abgelaufen – neuer Code wird erzeugt.',
@@ -137,8 +146,16 @@ const en: Record<keyof typeof de, string> = {
   'status.approved': 'Approved',
   'status.rejected': 'Rejected',
   'status.played': 'In the vote',
+  'privacy.short':
+    'Run privately by {name}. To take part we store a device cookie and a pseudonymised network key. We delete your device’s data no later than {days} days after your last activity.',
   'privacy.note':
-    'Privacy: To prevent double voting we store a random device ID and an anonymised network key. Data is deleted after the party.',
+    'Privacy: {name} runs this app privately. To make sure each device votes only once per round, we store a random device ID in a cookie and a pseudonymised network key derived from your IP address. Votes and device data are deleted no later than {days} days after your last activity; requests are then anonymised. Details, your rights and your right to object are in the privacy policy.',
+  'privacy.forget': 'Delete my data on this device',
+  'privacy.forget.confirm':
+    'Your votes, your device ID and the cookie will be deleted immediately and your requests anonymised. To take part again you will need to scan the QR code. Continue?',
+  'legal.privacy': 'Privacy',
+  'legal.imprint': 'Legal notice',
+  'legal.back': 'Back',
   'mood.1': 'Chill',
   'mood.2': 'Warm',
   'mood.3': 'Groove',
@@ -158,6 +175,7 @@ const en: Record<keyof typeof de, string> = {
   'tv.noMusic': 'Music starts shortly',
   'tv.upNextEmpty': 'The winning songs of the round appear here.',
   'tv.more': '+{count} more songs to vote on',
+  'tv.privacy': 'Privacy & legal notice: {host}/datenschutz',
   'display.pair.title': 'Pair this screen',
   'display.pair.text': 'Enter this code in the admin area under “Displays” and choose the screen role.',
   'display.pair.expired': 'Code expired – creating a new one.',

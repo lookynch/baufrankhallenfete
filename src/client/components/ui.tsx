@@ -1,4 +1,5 @@
 import { useEffect, useState, type ButtonHTMLAttributes, type ComponentProps, type ReactNode } from 'react';
+import { useI18n } from '../lib/i18n.tsx';
 
 type Variant = 'primary' | 'accent' | 'ghost' | 'danger' | 'outline';
 
@@ -186,5 +187,23 @@ export function useToast() {
 export function Empty({ children }: { children: ReactNode }) {
   return (
     <div className="rounded-2xl border border-dashed border-line px-4 py-10 text-center text-muted">{children}</div>
+  );
+}
+
+export function LanguageSwitch() {
+  const { lang, setLang } = useI18n();
+  return (
+    <div className="flex rounded-full bg-raised p-1 text-xs font-semibold ring-1 ring-line">
+      {(['de', 'en'] as const).map((l) => (
+        <button
+          key={l}
+          type="button"
+          onClick={() => setLang(l)}
+          className={`rounded-full px-3 py-1 uppercase ${lang === l ? 'bg-primary text-on-primary' : 'text-muted'}`}
+        >
+          {l}
+        </button>
+      ))}
+    </div>
   );
 }

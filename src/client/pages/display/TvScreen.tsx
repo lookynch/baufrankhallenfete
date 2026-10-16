@@ -160,6 +160,7 @@ export function TvScreen({ state, offsetMs }: { state: MusicState; offsetMs: num
           <div className="flex flex-1 flex-col justify-center gap-3">
             <div className="font-display text-4xl leading-tight font-bold">{t('tv.scan')}</div>
             <div className="font-mono text-xl break-all text-accent">{window.location.host}</div>
+            <div className="text-base text-muted">{t('tv.privacy', { host: window.location.host })}</div>
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-hidden rounded-3xl bg-surface/70 p-6 ring-1 ring-line">

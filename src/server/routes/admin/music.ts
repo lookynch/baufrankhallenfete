@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
+import { legal } from '../../../shared/legal.ts';
 import { moodLevelSchema } from '../../../shared/settings.ts';
 import { body, fail, idParam, query, type AppContext, type AppEnv } from '../../http.ts';
 import { randomToken, signValue, verifySignedValue } from '../../security/crypto.ts';
@@ -42,7 +43,7 @@ musicRoutes.post('/spotify/authorize', async (c) => {
     secure: true,
     httpOnly: true,
     sameSite: 'Lax',
-    maxAge: 600,
+    maxAge: legal.cookies.oauthMinutes * 60,
   });
   return c.json({ url: authorizeUrl(c.env, redirectUri(c), state) });
 });
