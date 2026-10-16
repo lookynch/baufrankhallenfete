@@ -28,6 +28,7 @@ interface PoolSong {
   duration_ms: number;
   level: number;
   wish_id: number | null;
+  device_id: string | null;
   upvotes: number;
 }
 
@@ -73,12 +74,12 @@ async function poolForSets(db: D1Database, setIds: number[] | null, settings: Se
   const { results } = await db
     .prepare(
       `SELECT s.id, ss.set_id, s.duration_ms, COALESCE(s.mood_level, s.auto_level, st.default_level) AS level,
-              w.id AS wish_id, (SELECT COUNT(*) FROM wish_upvotes u WHERE u.wish_id = w.id) AS upvotes
+              w.id AS wish_id, w.device_id, (SELECT COUNT(*) FROM wish_upvotes u WHERE u.wish_id = w.id) AS upvotes
        FROM set_songs ss
        JOIN songs s ON s.id = ss.song_id
        JOIN sets st ON st.id = ss.set_id
        LEFT JOIN wishes w ON w.song_id = s.id AND w.status = 'approved'
-       WHERE ${setIds ? `ss.set_id IN (${setIds.map((_, i) => `?${i + 3}`).join(', ')})` : '1 = 1'}
+       WHERE ${setIds ? `(ss.set_id IN (${setIds.map((_, i) => `?${i + 3}`).join(', ')}) OR ss.source = 'wish')` : '1 = 1'}
          AND s.active = 1 AND s.blocked_tag IS NULL AND s.vetoed = 0
          AND (?1 = 1 OR s.explicit = 0)
          AND NOT EXISTS (
@@ -107,6 +108,17 @@ function fitsRound(song: PoolSong, level: number, target: number): boolean {
   return Math.sign(song.level - level) !== -Math.sign(target - level);
 }
 
+function spreadByDevice(wishes: PoolSong[]): PoolSong[] {
+  const seen = new Set<string | null>();
+  const first: PoolSong[] = [];
+  const later: PoolSong[] = [];
+  for (const wish of wishes) {
+    (seen.has(wish.device_id) ? later : first).push(wish);
+    seen.add(wish.device_id);
+  }
+  return [...first, ...later];
+}
+
 export function pickCandidates(pool: PoolSong[], level: number, settings: Settings, target = level): PoolSong[] {
   const byId = new Map<number, PoolSong>();
   for (const song of pool) {
@@ -115,7 +127,7 @@ export function pickCandidates(pool: PoolSong[], level: number, settings: Settin
     if (!seen || (seen.level !== level && song.level === level)) byId.set(song.id, song);
   }
   const songs = [...byId.values()];
-  const wishes = songs.filter((s) => s.wish_id !== null).sort((a, b) => b.upvotes - a.upvotes);
+  const wishes = spreadByDevice(songs.filter((s) => s.wish_id !== null).sort((a, b) => b.upvotes - a.upvotes));
   const rest = shuffle(songs.filter((s) => s.wish_id === null));
   const wishShare = Math.ceil(settings.voting.candidatesPerRound / 2);
   const minMs = settings.voting.minRoundMinutes * MINUTE + CANDIDATE_BUFFER_MS;
@@ -164,7 +176,7 @@ export async function draftRound(
   };
   if (!set) return { ...planLevel({ ...input, isAvailable: () => false }), set, candidates: [] };
   const rows = await poolForSets(db, neighbourSetIds(sets, set), settings, excludeRoundId);
-  const own = rows.filter((s) => s.set_id === set.id);
+  const own = rows.filter((s) => s.set_id === set.id || s.wish_id !== null);
   const near = uniqueSongs([...own, ...rows]);
   const hasSongs = (songs: PoolSong[]) => (level: number) => songs.some((s) => s.level === level);
   const choose = (pools: PoolSong[][]) => {

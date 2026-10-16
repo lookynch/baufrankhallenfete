@@ -314,7 +314,7 @@ describe('Songwünsche', () => {
     expect(await createWish(db, spotify, 'dev-b', uri(0), NOW)).toMatchObject({ key: 'FETE-1', merged: true });
     await createWish(db, spotify, 'dev-a', uri(1), NOW);
     await createWish(db, spotify, 'dev-a', uri(2), NOW);
-    await expect(createWish(db, spotify, 'dev-a', uri(3), NOW)).rejects.toThrow('too_many_open_wishes');
+    expect(await createWish(db, spotify, 'dev-a', uri(3), NOW)).toMatchObject({ merged: false });
     await expect(createWish(db, spotify, 'dev-a', 'spotify:track:../../x', NOW)).rejects.toThrow('invalid_track');
 
     expect(await upvoteWish(db, created.id, 'dev-c', NOW)).toBe(false);
@@ -327,7 +327,7 @@ describe('Songwünsche', () => {
     const forOther = await guestWishes(db, 'dev-z');
     expect(forOther.map((w) => w.key)).toEqual(['FETE-1']);
     const mine = await guestWishes(db, 'dev-a');
-    expect(mine.filter((w) => w.mine)).toHaveLength(3);
+    expect(mine.filter((w) => w.mine)).toHaveLength(4);
     const level = await db
       .prepare('SELECT mood_level FROM songs WHERE spotify_uri = ?1')
       .bind(uri(0))

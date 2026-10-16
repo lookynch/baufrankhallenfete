@@ -143,6 +143,7 @@ export async function reconcile(
   spotify: SpotifyApi,
   snapshot: PlaybackSnapshot,
   fetchedAt: number,
+  votingSince: number | null,
 ): Promise<void> {
   const entries = await activeEntries(db);
   const playing = entries.find((e) => e.status === 'playing');
@@ -196,10 +197,13 @@ export async function reconcile(
                 .bind(pending.id),
         );
       }
-      const appHasPlayed = await db
-        .prepare('SELECT 1 AS x FROM playback WHERE started_at IS NOT NULL LIMIT 1')
-        .first<{ x: number }>();
-      await recordObservedPlay(db, snapshot, fetchedAt, appHasPlayed ? 'emergency' : 'preshow');
+      const winnerPlayed =
+        votingSince !== null &&
+        (await db
+          .prepare("SELECT 1 AS x FROM playback WHERE source = 'winner' AND started_at >= ?1 LIMIT 1")
+          .bind(votingSince)
+          .first<{ x: number }>());
+      await recordObservedPlay(db, snapshot, fetchedAt, winnerPlayed ? 'emergency' : 'preshow');
     }
   }
   if (statements.length) await db.batch(statements);

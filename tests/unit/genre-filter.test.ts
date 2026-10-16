@@ -243,14 +243,13 @@ describe('Automatische Freigabe', () => {
     expect(songs).toEqual({ n: 1 });
   });
 
-  it('begrenzt Wünsche pro Gerät auf drei pro Stunde, auch bei parallelen Anfragen', async () => {
+  it('kennt kein festes Limit pro Gerät', async () => {
     const { db, ctx, spotify, uri } = await setup();
     for (let i = 20; i < 26; i++) spotify.add(track(i, 'Dua Lipa'));
     const results = await Promise.allSettled(
-      [20, 21, 22, 23, 24].map((i) => createWish(db, ctx, 'dev-a', uri(i), NOW)),
+      [20, 21, 22, 23, 24, 25].map((i) => createWish(db, ctx, 'dev-a', uri(i), NOW)),
     );
-    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(3);
-    expect(await createWish(db, ctx, 'dev-a', uri(25), NOW + HOUR + 1)).toMatchObject({ status: 'approved' });
+    expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
   });
 });
 
@@ -296,6 +295,7 @@ describe('Kandidatenauswahl mit Wünschen', () => {
     duration_ms: minutes * 60_000,
     level,
     wish_id: wish ? id : null,
+    device_id: wish ? `dev-${id}` : null,
     upvotes: id,
   });
 

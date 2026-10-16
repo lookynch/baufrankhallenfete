@@ -21,8 +21,6 @@ const GLOBAL_SEARCH_LIMIT = 10;
 const GLOBAL_SEARCH_WINDOW_S = 30;
 const GLOBAL_TRACK_LIMIT = 10;
 const GLOBAL_TRACK_WINDOW_S = 30;
-const WISHES_PER_DEVICE = 3;
-const WISH_LIMIT_WINDOW_MS = 60 * 60_000;
 const MINUTE = 60_000;
 
 export interface WishContext {
@@ -227,11 +225,15 @@ export async function createWish(
 
   const song = await ensureSong(db, track, now, autoLevel);
   if (song.vetoed) throw new WishError('vetoed');
-  const played = await db
-    .prepare("SELECT 1 AS x FROM playback WHERE song_id = ?1 AND status IN ('playing', 'played') LIMIT 1")
+  const scheduled = await db
+    .prepare(
+      `SELECT MAX(status IN ('played', 'skipped')) AS done FROM playback
+       WHERE song_id = ?1 AND status NOT IN ('missed', 'cancelled')`,
+    )
     .bind(song.id)
-    .first();
-  if (played) throw new WishError('already_played');
+    .first<{ done: number | null }>();
+  if (scheduled?.done === 1) throw new WishError('already_played');
+  if (scheduled?.done === 0) throw new WishError('already_scheduled');
 
   const setId = ctx.settings.wishes.autoApprove ? await wishTargetSet(db, ctx.settings, now) : null;
   const status = setId === null ? 'open' : 'approved';
@@ -241,11 +243,9 @@ export async function createWish(
         `INSERT INTO wishes (song_id, device_id, status, created_at, decided_at)
          SELECT ?1, ?2, ?4, ?3, CASE WHEN ?4 = 'approved' THEN ?3 END
          WHERE NOT EXISTS (SELECT 1 FROM wishes WHERE song_id = ?1 AND status IN ('open', 'approved'))
-           AND (SELECT COUNT(*) FROM wishes
-                WHERE device_id = ?2 AND status IN ('open', 'approved') AND created_at > ?3 - ?5) < ?6
          ON CONFLICT DO NOTHING RETURNING id, status`,
       )
-      .bind(song.id, deviceId, now, status, WISH_LIMIT_WINDOW_MS, WISHES_PER_DEVICE),
+      .bind(song.id, deviceId, now, status),
   ];
   if (setId !== null) {
     statements.push(
@@ -260,7 +260,7 @@ export async function createWish(
     .prepare("SELECT id, status FROM wishes WHERE song_id = ?1 AND status IN ('open', 'approved')")
     .bind(song.id)
     .first<{ id: number; status: string }>();
-  if (!existing) throw new WishError('too_many_open_wishes');
+  if (!existing) throw new WishError('wish_conflict');
   let mergedStatus = existing.status;
   if (existing.status === 'open' && setId !== null) {
     const [approved] = await db.batch([
@@ -324,7 +324,11 @@ export interface WishView {
 export async function guestWishes(db: D1Database, deviceId: string): Promise<WishView[]> {
   const { results } = await db
     .prepare(
-      `SELECT w.id, w.status, w.created_at, s.spotify_uri AS uri, s.title, s.artist, s.image_url,
+      `SELECT w.id, w.created_at, s.spotify_uri AS uri, s.title, s.artist, s.image_url,
+              CASE WHEN w.status = 'approved' AND EXISTS (
+                SELECT 1 FROM playback p
+                WHERE p.wish_id = w.id AND p.status IN ('planned', 'queuing', 'queued', 'unknown', 'playing')
+              ) THEN 'queued' ELSE w.status END AS status,
               (SELECT COUNT(*) FROM wish_upvotes u WHERE u.wish_id = w.id) AS upvotes,
               (w.device_id = ?1) AS mine,
               EXISTS (SELECT 1 FROM wish_upvotes u WHERE u.wish_id = w.id AND u.device_id = ?1) AS upvoted

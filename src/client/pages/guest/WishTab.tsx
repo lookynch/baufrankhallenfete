@@ -17,7 +17,7 @@ interface Wish {
   id: number;
   key: string;
   uri: string;
-  status: 'open' | 'approved' | 'rejected' | 'played';
+  status: 'open' | 'approved' | 'queued' | 'rejected' | 'played';
   title: string;
   artist: string;
   image_url: string | null;
@@ -26,7 +26,13 @@ interface Wish {
   upvoted: boolean;
 }
 
-const statusTone = { open: 'warning', approved: 'success', rejected: 'danger', played: 'accent' } as const;
+const statusTone = {
+  open: 'warning',
+  approved: 'success',
+  queued: 'accent',
+  rejected: 'danger',
+  played: 'accent',
+} as const;
 
 export function WishTab({
   toast,
