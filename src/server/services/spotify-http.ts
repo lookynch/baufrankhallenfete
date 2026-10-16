@@ -16,6 +16,7 @@ import {
 
 const API = 'https://api.spotify.com/v1';
 const BACKOFF_KEY = 'spotify_backoff_until';
+export const LAST_ERROR_KEY = 'spotify_last_error';
 const LOG_INTERVAL_MS = 60_000;
 let backoffUntilMemo = 0;
 const lastLogged = new Map<string, number>();
@@ -30,11 +31,49 @@ export function pathTemplate(path: string): string {
   return path.split('?')[0]!.replace(/\/[A-Za-z0-9]{16,}(?=\/|$)/g, '/:id');
 }
 
-function logFailure(method: string, path: string, status: number, kind: SpotifyFailure, body: string, time: number) {
+export interface SpotifyLastError {
+  at: number;
+  method: string;
+  path: string;
+  status: number;
+  kind: SpotifyFailure;
+  reason: string | null;
+  message: string | null;
+}
+
+function errorMessage(body: string): string | null {
+  try {
+    const message = (JSON.parse(body) as { error?: { message?: unknown } }).error?.message;
+    return typeof message === 'string' ? message.slice(0, 200) : null;
+  } catch {
+    return body ? body.slice(0, 200) : null;
+  }
+}
+
+async function logFailure(
+  db: D1Database,
+  method: string,
+  path: string,
+  status: number,
+  kind: SpotifyFailure,
+  body: string,
+  time: number,
+) {
   const key = `${method} ${pathTemplate(path)} ${status}`;
   if ((lastLogged.get(key) ?? 0) + LOG_INTERVAL_MS > time) return;
   lastLogged.set(key, time);
-  console.warn(`spotify ${key} ${kind} reason=${spotifyErrorReason(body) ?? '-'}`);
+  const reason = spotifyErrorReason(body);
+  console.warn(`spotify ${key} ${kind} reason=${reason ?? '-'}`);
+  const entry: SpotifyLastError = {
+    at: time,
+    method,
+    path: pathTemplate(path),
+    status,
+    kind,
+    reason,
+    message: errorMessage(body),
+  };
+  await setKv(db, LAST_ERROR_KEY, entry, time);
 }
 
 export function createHttpSpotify(env: Env, now: () => number, fetcher: typeof fetch = fetch): SpotifyApi {
@@ -51,7 +90,18 @@ export function createHttpSpotify(env: Env, now: () => number, fetcher: typeof f
       return failure('rate_limited');
     }
     const token = await validAccessToken(env, time, fetcher);
-    if (!token) return failure('not_connected');
+    if (!token) {
+      await logFailure(
+        env.DB,
+        method,
+        path,
+        0,
+        'not_connected',
+        'Zugangstoken fehlt oder Erneuerung fehlgeschlagen',
+        time,
+      );
+      return failure('not_connected');
+    }
     let response: Response;
     try {
       response = await fetcher(`${API}${path}`, {
@@ -64,6 +114,7 @@ export function createHttpSpotify(env: Env, now: () => number, fetcher: typeof f
         signal: AbortSignal.timeout(6_000),
       });
     } catch {
+      await logFailure(env.DB, method, path, 0, 'unknown', 'Keine Antwort (Timeout oder Netzwerk)', time);
       return failure('unknown');
     }
     if (response.status === 429) {
@@ -84,7 +135,7 @@ export function createHttpSpotify(env: Env, now: () => number, fetcher: typeof f
     }
     const message = await response.text().catch(() => '');
     const kind = spotifyFailureKind(response.status, message);
-    logFailure(method, path, response.status, kind, message, time);
+    await logFailure(env.DB, method, path, response.status, kind, message, time);
     return failure(kind, response.status, message.slice(0, 300));
   }
 
@@ -152,19 +203,19 @@ export function createHttpSpotify(env: Env, now: () => number, fetcher: typeof f
       );
     },
     async search(query) {
-      const params = new URLSearchParams({ q: query, type: 'track', limit: '10', market: 'from_token' });
+      const params = new URLSearchParams({ q: query, type: 'track', limit: '10' });
       return mapResult(await call('GET', `/search?${params}`), (json) =>
         tracksFrom((json?.tracks as Json | undefined)?.items),
       );
     },
     async track(id) {
-      const result = await call('GET', `/tracks/${encodeURIComponent(id)}?market=from_token`);
+      const result = await call('GET', `/tracks/${encodeURIComponent(id)}`);
       if (!result.ok) return result;
       const track = mapTrack(result.value as Parameters<typeof mapTrack>[0]);
       return track ? { ok: true, value: track } : failure('not_found');
     },
     async playlistPage(id, offset) {
-      const params = new URLSearchParams({ limit: '50', offset: String(offset), market: 'from_token' });
+      const params = new URLSearchParams({ limit: '50', offset: String(offset) });
       const result = await call('GET', `/playlists/${encodeURIComponent(id)}/items?${params}`);
       if (!result.ok) return result;
       const json = result.value;

@@ -24,6 +24,7 @@ import { purgeNow } from '../../services/retention.ts';
 import { expectedCloseAt, openRound } from '../../services/rounds.ts';
 import { loadSettings, saveSettings, SettingsError } from '../../services/settings.ts';
 import { authStatus } from '../../services/spotify-auth.ts';
+import { LAST_ERROR_KEY, type SpotifyLastError } from '../../services/spotify-http.ts';
 import { readSnapshot } from '../../services/tick.ts';
 import { nowPlayingView, upNextView } from '../../views.ts';
 import {
@@ -86,6 +87,7 @@ systemRoutes.get('/dashboard', async (c) => {
   return c.json({
     now,
     spotify: await authStatus(c.env),
+    spotifyLastError: (await getKv<SpotifyLastError>(db, LAST_ERROR_KEY))?.value ?? null,
     snapshot,
     nowPlaying: nowPlayingView(snapshot),
     round: round

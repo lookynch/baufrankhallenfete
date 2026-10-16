@@ -2,7 +2,7 @@ import { Link } from 'react-router';
 import { Cover, MoodBadge } from '../../components/music.tsx';
 import { Badge, Card, Notice, Spinner, Stat } from '../../components/ui.tsx';
 import { formatDuration, formatEuro, formatTime, useNow } from '../../lib/time.ts';
-import { PageTitle, useAdminData } from './shared.tsx';
+import { PageTitle, spotifyMessage, useAdminData } from './shared.tsx';
 
 interface DashboardData {
   now: number;
@@ -21,6 +21,14 @@ interface DashboardData {
   agents: Array<{ id: string; at: number; queueLength: number; serialOk: boolean | null }>;
   displays: Array<{ id: number; name: string; kind: string; last_seen_at: number | null }>;
   budget: { requestsToday: number | null; fraction: number | null; fetchedAt: number; error: string | null } | null;
+  spotifyLastError: {
+    at: number;
+    method: string;
+    path: string;
+    status: number;
+    kind: string;
+    message: string | null;
+  } | null;
   ipLimitRejections: number;
   hiddenSearches: number;
   genreFilter: boolean;
@@ -64,6 +72,12 @@ export function Dashboard() {
   const warnings: string[] = [];
   if (!data.spotify.configured) warnings.push('Spotify-Secrets fehlen (SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET).');
   else if (!data.spotify.connected) warnings.push('Spotify ist nicht verbunden.');
+  const lastError = data.spotifyLastError;
+  if (data.spotify.connected && lastError && now - lastError.at < 30 * 60_000) {
+    warnings.push(
+      `Spotify-Fehler ${ago(now, lastError.at)}: ${lastError.method} ${lastError.path} → ${lastError.status || '–'} – ${spotifyMessage(lastError.kind)}${lastError.message ? ` („${lastError.message}“)` : ''}`,
+    );
+  }
   if (data.spotify.refreshValidUntil && data.spotify.refreshValidUntil - now < 30 * 86_400_000) {
     warnings.push('Spotify-Freigabe läuft in weniger als 30 Tagen ab – neu verbinden.');
   }

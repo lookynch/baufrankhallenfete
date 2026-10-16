@@ -15,7 +15,8 @@ import {
   spotifyFailureKind,
   unsupportedSpotifyReference,
 } from '../../src/server/services/spotify-api.ts';
-import { createHttpSpotify, pathTemplate } from '../../src/server/services/spotify-http.ts';
+import { getKv } from '../../src/server/services/kv.ts';
+import { createHttpSpotify, LAST_ERROR_KEY, pathTemplate } from '../../src/server/services/spotify-http.ts';
 import { createWish, decideWish, guestWishes, searchTracks, upvoteWish } from '../../src/server/services/wishes.ts';
 import { claimPairing, pollPairing, startPairing, authenticateDisplay } from '../../src/server/services/displays.ts';
 import { defaultSettings } from '../../src/shared/settings.ts';
@@ -154,7 +155,7 @@ describe('Spotify-Anbindung', () => {
       later,
     );
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const { fetcher } = fakeFetch(
+    const { fetcher, calls } = fakeFetch(
       () =>
         new Response(
           JSON.stringify({ error: { message: 'Active premium subscription required for the owner of the app.' } }),
@@ -169,9 +170,19 @@ describe('Spotify-Anbindung', () => {
     await spotify.search('noch einer');
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]![0])).toBe('spotify GET /search 403 owner_premium_required reason=-');
+    expect((await getKv(env.DB, LAST_ERROR_KEY))?.value).toEqual({
+      at: later,
+      method: 'GET',
+      path: '/search',
+      status: 403,
+      kind: 'owner_premium_required',
+      reason: null,
+      message: 'Active premium subscription required for the owner of the app.',
+    });
     clock.advance(61_000);
     await spotify.track('4uLU6hMCjMI75M1A2tKUQC');
     expect(String(warn.mock.calls.at(-1)![0])).toContain('GET /tracks/:id 403');
+    expect(calls.map((c) => c.url).filter((url) => url.includes('market='))).toEqual([]);
     warn.mockRestore();
     expect(pathTemplate('/playlists/37i9dQZF1DXcBWIGoYBM5M/items?limit=50')).toBe('/playlists/:id/items');
   });
