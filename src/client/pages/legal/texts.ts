@@ -55,7 +55,7 @@ const privacyDe: LegalDocument = {
         'Zum Mitmachen scannst du den QR-Code am Bildschirm. Dein Gerät erhält dann ein Cookie mit einer zufälligen Geräte-ID. Damit niemand mehrfach abstimmt, speichern wir außerdem einen pseudonymisierten Netz-Schlüssel, der aus deiner IP-Adresse berechnet wird. Deinen Namen oder deine Kontaktdaten erfragen wir nicht.',
         'Die Teilnahme ist freiwillig. Du bist weder gesetzlich noch vertraglich verpflichtet, Daten bereitzustellen. Ohne das Geräte-Cookie kannst du allerdings nicht abstimmen und keine Wünsche abgeben.',
         'Die App lädt Inhalte nur von dieser Domain. Sie enthält keine Werbung, kein Tracking und keine Skripte, Schriften oder Bilder von Drittanbietern.',
-        `Daten deines Geräts löschen wir automatisch spätestens ${r.guestDays} Tage nach deiner letzten Aktivität (Abschnitt 7). Sofort löschen kannst du sie in der App mit „Meine Daten auf diesem Gerät löschen“.`,
+        `Daten deines Geräts löschen wir automatisch im täglichen Löschlauf, sobald deine letzte Aktivität ${r.guestDays} Tage zurückliegt (Abschnitt 7). Solange dein Geräte-Cookie gilt, kannst du sie in der App mit „Meine Daten auf diesem Gerät löschen“ sofort löschen.`,
       ],
     },
     {
@@ -89,7 +89,7 @@ const privacyDe: LegalDocument = {
           facts: [
             [
               'Daten',
-              'Cookie `__Host-fete` mit einer zufälligen Geräte-ID und seinem Ablaufzeitpunkt, signiert und für JavaScript nicht lesbar. In der Datenbank: Geräte-ID, Zeitpunkt des ersten und des letzten Beitritts und der Netz-Schlüssel (c).',
+              'Cookie `__Host-fete` mit einer zufälligen Geräte-ID und seinem Ablaufzeitpunkt, signiert und für JavaScript nicht lesbar. In der Datenbank: Geräte-ID sowie Zeitpunkt des ersten und des letzten Beitritts.',
             ],
             [
               'Zweck',
@@ -119,7 +119,7 @@ const privacyDe: LegalDocument = {
             ],
             [
               'Empfänger',
-              'Im Adminbereich sehen die Helfer bei auffälligen Netzen nur die ersten Zeichen des Netz-Schlüssels und die Zahl der Geräte sowie die aktuellen Anfrage-Zähler.',
+              `Im Adminbereich sehen die Helfer bei auffälligen Netzen die ersten Zeichen des Netz-Schlüssels und die Zahl der Geräte. Setzt die Moderation Stimmen eines Netzes ungültig, steht dieser Anfang bis zu ${r.guestDays} Tage im Audit-Log. Außerdem sehen die Helfer die Anfrage-Zähler der letzten Stunde mit vollständigem Netz-Schlüssel bzw. Geräte-ID, um Sperren aufheben zu können.`,
             ],
           ],
         },
@@ -179,7 +179,7 @@ const privacyDe: LegalDocument = {
         { heading: 'h) Links zu Spotify' },
         'Tippst du auf einen Link zu Spotify, öffnet dein Browser eine Seite von Spotify. Erst dann erhält Spotify Daten von deinem Gerät; dafür gilt die Datenschutzerklärung von Spotify.',
         { heading: 'i) Sprachwahl' },
-        'Tippst du auf DE oder EN, speichert dein Browser die Wahl im Local Storage (`lang`). Der Eintrag bleibt auf deinem Gerät und wird nicht an uns gesendet. Rechtsgrundlage: § 25 Abs. 2 Nr. 2 TDDDG.',
+        'Tippst du auf DE oder EN, speichert dein Browser die Wahl im Local Storage (`lang`). Der Eintrag bleibt auf deinem Gerät und wird nicht an uns gesendet. Ohne gespeicherte Wahl liest die App die Spracheinstellung deines Browsers aus, nur auf deinem Gerät und nur, um die Sprache festzulegen. Rechtsgrundlage: § 25 Abs. 2 Nr. 2 TDDDG.',
         { heading: 'j) Automatische Schutzgrenzen' },
         'Feste Grenzen, etwa für Stimmen je Netz und Runde oder Anfragen pro Minute, können eine Stimme oder Anfrage ablehnen. Das ist keine automatisierte Entscheidung im Sinne von Art. 22 DSGVO, weil sie dich weder rechtlich noch in ähnlicher Weise erheblich beeinträchtigt.',
         { heading: 'k) Kontakt per E-Mail' },
@@ -249,14 +249,16 @@ const privacyDe: LegalDocument = {
             'Gmail (Google): nur wenn du uns eine E-Mail schreibst (Abschnitt 3 k).',
           ],
         },
-        'Darüber hinaus geben wir keine Daten weiter.',
+        'Empfänger von Admin-Daten nennt zusätzlich Abschnitt 11. Darüber hinaus geben wir keine Daten weiter.',
       ],
     },
     {
       title: '6. Übermittlung in Drittländer',
       blocks: [
-        'Cloudflare betreibt ein weltweites Netz. Daten können deshalb auch in den USA oder anderen Ländern außerhalb der EU verarbeitet werden, auch die Datenbank kann dort liegen. Grundlage ist das EU-U.S. Data Privacy Framework (Angemessenheitsbeschluss der EU-Kommission, Durchführungsbeschluss (EU) 2023/1795), hilfsweise Standardvertragsklauseln der EU-Kommission (Durchführungsbeschluss (EU) 2021/914), wie im Auftragsverarbeitungsvertrag von Cloudflare vorgesehen.',
+        'Cloudflare betreibt ein weltweites Netz. Daten können deshalb auch außerhalb der EU verarbeitet werden, insbesondere in den USA; auch die Datenbank kann außerhalb der EU liegen.',
+        'Für die USA ist Grundlage das EU-U.S. Data Privacy Framework (Angemessenheitsbeschluss der EU-Kommission, Durchführungsbeschluss (EU) 2023/1795), hilfsweise gelten Standardvertragsklauseln der EU-Kommission (Durchführungsbeschluss (EU) 2021/914). Für andere Länder ohne Angemessenheitsbeschluss gelten diese Standardvertragsklauseln. Beides regelt Ziffer 6 des Auftragsverarbeitungsvertrags von Cloudflare, der die Klauseln einbezieht: https://www.cloudflare.com/cloudflare-customer-dpa/. Ihr Wortlaut steht im Anhang des Durchführungsbeschlusses (EU) 2021/914 im Amtsblatt der EU.',
         'Spotify AB hat ihren Sitz in Schweden, also in der EU.',
+        'E-Mails an den Betreiber liegen bei Gmail (Abschnitt 3 k). Google kann Daten auf Servern weltweit verarbeiten, auch außerhalb der EU; Einzelheiten: https://policies.google.com/privacy',
       ],
     },
     {
@@ -266,7 +268,7 @@ const privacyDe: LegalDocument = {
           table: [
             ['Daten', 'Frist'],
             ['Stimmen', `${r.guestDays} Tage nach der letzten Änderung gelöscht`],
-            ['Geräteeintrag (Geräte-ID, Netz-Schlüssel)', `${r.guestDays} Tage nach dem letzten Beitritt gelöscht`],
+            ['Geräteeintrag (Geräte-ID, Zeitpunkte)', `${r.guestDays} Tage nach dem letzten Beitritt gelöscht`],
             [
               'Wünsche und Unterstützungen',
               `nach ${r.guestDays} Tagen anonymisiert: Geräte-ID und Netz-Schlüssel werden entfernt, der Wunsch selbst bleibt ohne Personenbezug`,
@@ -280,7 +282,7 @@ const privacyDe: LegalDocument = {
           ],
         },
         `Gelöscht wird automatisch einmal täglich; die Löschung kann daher bis zu einen Tag nach Ablauf der Frist erfolgen. Gelöschte Daten bleiben anschließend noch bis zu ${r.restoreDays} Tage in der Wiederherstellungsfunktion der Datenbank (Cloudflare D1 Time Travel) und sind danach endgültig entfernt.`,
-        `Mit „Meine Daten auf diesem Gerät löschen“ löschen wir sofort deine Stimmen, deinen Geräteeintrag und das Cookie und anonymisieren deine Wünsche. Anfrage-Zähler zu deinem Netz-Schlüssel werden nach ${r.shortHours} Stunden gelöscht.`,
+        `Mit „Meine Daten auf diesem Gerät löschen“ löschen wir sofort deine Stimmen, deine Unterstützungen, deinen Geräteeintrag und das Cookie und anonymisieren deine Wünsche. Das geht, solange dein Geräte-Cookie gilt. Anfrage-Zähler zu deinem Netz-Schlüssel werden nach ${r.shortHours} Stunden gelöscht.`,
       ],
     },
     {
@@ -297,7 +299,7 @@ const privacyDe: LegalDocument = {
           ],
         },
         'Ein Recht auf Datenübertragbarkeit (Art. 20 DSGVO) besteht nicht, weil wir Daten nur auf Grundlage berechtigter Interessen verarbeiten.',
-        'Gäste kennen wir nur über die zufällige Geräte-ID im Cookie. Ohne zusätzliche Angaben können wir Anfragen deshalb keinem Gerät zuordnen (Art. 11 Abs. 2 DSGVO). Die Daten deines Geräts kannst du aber jederzeit selbst löschen (Abschnitt 9).',
+        `Gäste kennen wir nur über die zufällige Geräte-ID im Cookie. Ohne zusätzliche Angaben können wir Anfragen deshalb keinem Gerät zuordnen (Art. 11 Abs. 2 DSGVO). Solange dein Geräte-Cookie gilt (höchstens ${r.cookieMaxHours} Stunden ab dem ersten Scan), kannst du die Daten deines Geräts in der App selbst löschen (Abschnitt 9). Danach löschen wir sie automatisch nach Abschnitt 7.`,
         `Für alle Anliegen genügt eine E-Mail an ${c.email}.`,
       ],
     },
@@ -308,7 +310,7 @@ const privacyDe: LegalDocument = {
           notice: 'Widerspruchsrecht nach Art. 21 DSGVO',
           text: [
             'Du kannst der Verarbeitung deiner Daten, die auf Art. 6 Abs. 1 lit. f DSGVO beruht, jederzeit aus Gründen widersprechen, die sich aus deiner besonderen Situation ergeben.',
-            `Am schnellsten geht das in der App mit „Meine Daten auf diesem Gerät löschen“ unten auf der Seite: Dann löschen wir sofort deine Stimmen, deinen Geräteeintrag und das Cookie und anonymisieren deine Wünsche. Du kannst auch formlos per E-Mail an ${c.email} widersprechen.`,
+            `Solange dein Geräte-Cookie gilt, geht das am schnellsten in der App mit „Meine Daten auf diesem Gerät löschen“ unten auf der Seite: Dann löschen wir sofort deine Stimmen, deine Unterstützungen, deinen Geräteeintrag und das Cookie und anonymisieren deine Wünsche. Du kannst auch formlos per E-Mail an ${c.email} widersprechen.`,
           ],
         },
       ],
@@ -364,12 +366,16 @@ const privacyDe: LegalDocument = {
               'Art. 6 Abs. 1 lit. f DSGVO. Berechtigtes Interesse: ein sicherer Adminbereich, in dem sich Änderungen nachvollziehen lassen. Widerspruch per E-Mail (Abschnitt 9).',
             ],
             [
+              'Bereitstellung',
+              'Die Mithilfe im Adminbereich ist freiwillig. Ohne Konto mit Passwort und Zwei-Faktor-Code ist kein Zugang zum Adminbereich möglich.',
+            ],
+            [
               'Empfänger',
-              'Cloudflare als Auftragsverarbeiter (Abschnitt 5), Spotify bei der Verbindung des Spotify-Kontos. Alle Admins sehen die Liste der Admins und das Audit-Log ohne Netz-Schlüssel.',
+              'Cloudflare als Auftragsverarbeiter (Abschnitt 5), Spotify bei der Verbindung des Spotify-Kontos. Die Buchhaltung des Ausrichters erhält nach der Fete das Verbrauchsprotokoll mit dem Anzeigenamen des Admins, der jeweils gebucht hat („Erfasst von“). Alle Admins sehen die Liste der Admins, das Audit-Log ohne Netz-Schlüssel und die Anmelde-Zähler der letzten Stunde mit Netz-Schlüssel bzw. Benutzername.',
             ],
             [
               'Speicherdauer',
-              `Aktive Konten bis zur Deaktivierung. Deaktivierte Konten werden ${r.adminDays} Tage nach der letzten Anmeldung automatisch gelöscht, Einladungen ${r.adminDays} Tage nach ihrem Ablauf. Sitzungen enden nach ${k.adminHours} Stunden oder ${k.adminIdleHours} Stunden ohne Aktivität und werden beim nächsten Löschlauf entfernt. Audit-Einträge ${r.auditDays} Tage, der Netz-Schlüssel darin ${r.guestDays} Tage, Anmelde-Zähler ${r.shortHours} Stunden. Spotify-Zugangsschlüssel bis zur Trennung der Verbindung. Buchungen, Einstellungen, Bildschirme und die Titelliste bleiben ohne feste Frist erhalten, weil sie für Abrechnung und Ablauf der Fete gebraucht werden; nach Löschung eines Kontos ist die gespeicherte Nummer keinem Konto mehr zugeordnet. Auf Anfrage löschen wir dein Konto jederzeit.`,
+              `Aktive Konten bis zur Deaktivierung. Deaktivierte Konten werden ${r.adminDays} Tage nach der letzten Anmeldung automatisch gelöscht, Einladungen ${r.adminDays} Tage nach ihrem Ablauf. Sitzungen enden nach ${k.adminHours} Stunden oder ${k.adminIdleHours} Stunden ohne Aktivität und werden beim nächsten Löschlauf entfernt. Audit-Einträge ${r.auditDays} Tage, der Netz-Schlüssel darin ${r.guestDays} Tage, Anmelde-Zähler ${r.shortHours} Stunden. Spotify-Zugangsschlüssel bis zur Trennung der Verbindung. Für Buchungen, Einstellungen, Bildschirme und die Titelliste gibt es keine feste Frist; sie bleiben erhalten, solange sie für Abrechnung und Ablauf der Fete gebraucht werden; nach Löschung eines Kontos ist die gespeicherte Nummer keinem Konto mehr zugeordnet. Auf Anfrage löschen wir dein Konto jederzeit.`,
             ],
           ],
         },
@@ -397,7 +403,7 @@ const privacyEn: LegalDocument = {
         'To take part, scan the QR code on the screen. Your device then receives a cookie with a random device ID. To prevent multiple votes we also store a pseudonymised network key derived from your IP address. We do not ask for your name or contact details.',
         'Taking part is voluntary. You are under no legal or contractual obligation to provide data. Without the device cookie, however, you cannot vote or request songs.',
         'The app only loads content from this domain. It contains no advertising, no tracking and no third-party scripts, fonts or images.',
-        `We automatically delete your device’s data no later than ${r.guestDays} days after your last activity (section 7). You can delete it immediately in the app with “Delete my data on this device”.`,
+        `We automatically delete your device’s data in the daily deletion run once ${r.guestDays} days have passed since your last activity (section 7). While your device cookie is valid, you can delete it immediately in the app with “Delete my data on this device”.`,
       ],
     },
     {
@@ -428,7 +434,7 @@ const privacyEn: LegalDocument = {
           facts: [
             [
               'Data',
-              'Cookie `__Host-fete` with a random device ID and its expiry time, signed and not readable by JavaScript. In the database: device ID, time of first and last joining, and the network key (c).',
+              'Cookie `__Host-fete` with a random device ID and its expiry time, signed and not readable by JavaScript. In the database: device ID and time of first and last joining.',
             ],
             [
               'Purpose',
@@ -458,7 +464,7 @@ const privacyEn: LegalDocument = {
             ],
             [
               'Recipients',
-              'For conspicuous networks, helpers in the admin area only see the first characters of the network key and the number of devices, as well as current request counters.',
+              `For conspicuous networks, helpers in the admin area see the first characters of the network key and the number of devices. If moderators invalidate a network’s votes, these first characters remain in the audit log for up to ${r.guestDays} days. Helpers also see the request counters of the last hour with the full network key or device ID so that they can lift blocks.`,
             ],
           ],
         },
@@ -518,7 +524,7 @@ const privacyEn: LegalDocument = {
         { heading: 'h) Links to Spotify' },
         'If you tap a link to Spotify, your browser opens a Spotify page. Only then does Spotify receive data from your device; Spotify’s privacy policy applies.',
         { heading: 'i) Language choice' },
-        'If you tap DE or EN, your browser stores the choice in local storage (`lang`). The entry stays on your device and is not sent to us. Legal basis: Section 25(2) no. 2 TDDDG.',
+        'If you tap DE or EN, your browser stores the choice in local storage (`lang`). The entry stays on your device and is not sent to us. Without a stored choice, the app reads your browser’s language setting, only on your device and only to choose the language. Legal basis: Section 25(2) no. 2 TDDDG.',
         { heading: 'j) Automatic safeguards' },
         'Fixed limits, for example on votes per network and round or on requests per minute, can reject a vote or request. This is not an automated decision within the meaning of Art. 22 GDPR, as it does not affect you legally or in a similarly significant way.',
         { heading: 'k) Contact by email' },
@@ -583,14 +589,16 @@ const privacyEn: LegalDocument = {
             'Gmail (Google): only if you email us (section 3 k).',
           ],
         },
-        'We do not pass on data beyond this.',
+        'Recipients of admin data are additionally listed in section 11. We do not pass on data beyond this.',
       ],
     },
     {
       title: '6. Transfers to third countries',
       blocks: [
-        'Cloudflare runs a global network. Data may therefore also be processed in the USA or other countries outside the EU, and the database may be located there too. The basis is the EU-U.S. Data Privacy Framework (adequacy decision of the European Commission, Implementing Decision (EU) 2023/1795), alternatively the European Commission’s standard contractual clauses (Implementing Decision (EU) 2021/914), as provided for in Cloudflare’s data processing agreement.',
+        'Cloudflare runs a global network. Data may therefore also be processed outside the EU, in particular in the USA; the database may also be located outside the EU.',
+        'For the USA, the basis is the EU-U.S. Data Privacy Framework (adequacy decision of the European Commission, Implementing Decision (EU) 2023/1795), alternatively the European Commission’s standard contractual clauses (Implementing Decision (EU) 2021/914). For other countries without an adequacy decision, these standard contractual clauses apply. Both are governed by section 6 of Cloudflare’s data processing agreement, which incorporates the clauses: https://www.cloudflare.com/cloudflare-customer-dpa/. Their wording is set out in the annex to Implementing Decision (EU) 2021/914 in the Official Journal of the EU.',
         'Spotify AB is based in Sweden, i.e. in the EU.',
+        'Emails to the operator are stored with Gmail (section 3 k). Google may process data on servers around the world, including outside the EU; details: https://policies.google.com/privacy',
       ],
     },
     {
@@ -600,7 +608,7 @@ const privacyEn: LegalDocument = {
           table: [
             ['Data', 'Period'],
             ['Votes', `deleted ${r.guestDays} days after the last change`],
-            ['Device entry (device ID, network key)', `deleted ${r.guestDays} days after last joining`],
+            ['Device entry (device ID, timestamps)', `deleted ${r.guestDays} days after last joining`],
             [
               'Requests and support',
               `anonymised after ${r.guestDays} days: device ID and network key are removed, the request itself remains without personal reference`,
@@ -614,7 +622,7 @@ const privacyEn: LegalDocument = {
           ],
         },
         `Deletion runs automatically once a day, so it may take place up to one day after a period has expired. Deleted data then remains in the database’s restore function (Cloudflare D1 Time Travel) for up to ${r.restoreDays} days and is removed for good afterwards.`,
-        `With “Delete my data on this device” we immediately delete your votes, your device entry and the cookie and anonymise your requests. Request counters for your network key are deleted after ${r.shortHours} hours.`,
+        `With “Delete my data on this device” we immediately delete your votes, your support, your device entry and the cookie and anonymise your requests. This works while your device cookie is valid. Request counters for your network key are deleted after ${r.shortHours} hours.`,
       ],
     },
     {
@@ -631,7 +639,7 @@ const privacyEn: LegalDocument = {
           ],
         },
         'There is no right to data portability (Art. 20 GDPR), as we only process data on the basis of legitimate interests.',
-        'We only know guests by the random device ID in the cookie. Without additional information we therefore cannot link requests to a device (Art. 11(2) GDPR). You can, however, delete your device’s data yourself at any time (section 9).',
+        `We only know guests by the random device ID in the cookie. Without additional information we therefore cannot link requests to a device (Art. 11(2) GDPR). While your device cookie is valid (at most ${r.cookieMaxHours} hours from the first scan), you can delete your device’s data yourself in the app (section 9). After that, we delete it automatically as described in section 7.`,
         `For any request, an email to ${c.email} is sufficient.`,
       ],
     },
@@ -642,7 +650,7 @@ const privacyEn: LegalDocument = {
           notice: 'Right to object under Art. 21 GDPR',
           text: [
             'You may object at any time, on grounds relating to your particular situation, to the processing of your data based on Art. 6(1)(f) GDPR.',
-            `The quickest way is “Delete my data on this device” at the bottom of the app: we then immediately delete your votes, your device entry and the cookie and anonymise your requests. You can also object informally by email to ${c.email}.`,
+            `While your device cookie is valid, the quickest way is “Delete my data on this device” at the bottom of the app: we then immediately delete your votes, your support, your device entry and the cookie and anonymise your requests. You can also object informally by email to ${c.email}.`,
           ],
         },
       ],
@@ -698,12 +706,16 @@ const privacyEn: LegalDocument = {
               'Art. 6(1)(f) GDPR. Legitimate interest: a secure admin area in which changes can be traced. Objection by email (section 9).',
             ],
             [
+              'Provision',
+              'Helping in the admin area is voluntary. Without an account with password and two-factor code there is no access to the admin area.',
+            ],
+            [
               'Recipients',
-              'Cloudflare as processor (section 5), Spotify when connecting the Spotify account. All admins see the list of admins and the audit log without network keys.',
+              'Cloudflare as processor (section 5), Spotify when connecting the Spotify account. After the party, the host’s accounting receives the consumption log with the display name of the admin who made each booking (“Erfasst von”). All admins see the list of admins, the audit log without network keys and the login counters of the last hour with network key or user name.',
             ],
             [
               'Retention',
-              `Active accounts until deactivation. Deactivated accounts are deleted automatically ${r.adminDays} days after the last login, invitations ${r.adminDays} days after they expire. Sessions end after ${k.adminHours} hours or ${k.adminIdleHours} hours of inactivity and are removed at the next deletion run. Audit entries ${r.auditDays} days, the network key in them ${r.guestDays} days, login counters ${r.shortHours} hours. Spotify access keys until the connection is removed. Bookings, settings, screens and the track list are kept without a fixed period because they are needed for accounting and running the party; once an account is deleted, the stored number no longer refers to any account. On request we delete your account at any time.`,
+              `Active accounts until deactivation. Deactivated accounts are deleted automatically ${r.adminDays} days after the last login, invitations ${r.adminDays} days after they expire. Sessions end after ${k.adminHours} hours or ${k.adminIdleHours} hours of inactivity and are removed at the next deletion run. Audit entries ${r.auditDays} days, the network key in them ${r.guestDays} days, login counters ${r.shortHours} hours. Spotify access keys until the connection is removed. There is no fixed period for bookings, settings, screens and the track list; they are kept as long as they are needed for accounting and running the party; once an account is deleted, the stored number no longer refers to any account. On request we delete your account at any time.`,
             ],
           ],
         },

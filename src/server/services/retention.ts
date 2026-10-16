@@ -38,7 +38,7 @@ export function forgetDeviceStatements(db: D1Database, deviceId: string): D1Prep
     'DELETE FROM votes WHERE device_id = ?1',
     'DELETE FROM devices WHERE id = ?1',
     "UPDATE wishes SET device_id = 'anon' WHERE device_id = ?1",
-    "UPDATE wish_upvotes SET device_id = 'anon-' || rowid, ip_key = NULL WHERE device_id = ?1",
+    'DELETE FROM wish_upvotes WHERE device_id = ?1',
     "DELETE FROM rate_limits WHERE substr(key, -length(?1) - 1) = ':' || ?1",
   ].map((sql) => db.prepare(sql).bind(deviceId));
 }

@@ -28,7 +28,7 @@ Für beide Einträge gilt: Verantwortlicher ist der Betreiber (`legal.controller
 - **Betroffene:** Gäste der Fete, überwiegend Beschäftigte der GmbH. Ob auch Externe teilnehmen, ist offen.
 - **Daten:**
   - Cookie `__Host-fete` mit zufälliger Geräte-ID und Ablaufzeit, signiert.
-  - `devices`: Geräte-ID, erster und letzter Beitritt, Netz-Schlüssel.
+  - `devices`: Geräte-ID, erster und letzter Beitritt. Die Spalte `ip_key` wird nicht mehr geschrieben, weil sie keinen Zweck hat.
   - `votes`: Runde, Song, Geräte-ID, Netz-Schlüssel (IPv4 bzw. IPv6-/64 und /48), Zeitpunkte, Ungültig-Vermerk.
   - `wishes` und `wish_upvotes`: Song, Geräte-ID, Status, Zeitpunkte; bei Unterstützungen zusätzlich der Netz-Schlüssel.
   - `search_cache`: Suchtext und Ergebnisse ohne Gerätebezug.
@@ -36,7 +36,7 @@ Für beide Einträge gilt: Verantwortlicher ist der Betreiber (`legal.controller
   - Verbindungsdaten bei Cloudflare (IP-Adresse, User-Agent, URL). Die App selbst führt kein Zugriffsprotokoll und speichert keine IP-Adresse im Klartext.
   - Local Storage `lang`, bleibt auf dem Gerät.
   - E-Mail-Anfragen: Adresse und Inhalt.
-- **Empfänger:** Cloudflare (Auftragsverarbeiter); Spotify AB (Suchtext, Track-Kennung); Admin-Helfer (Wünsche ohne Geräte-ID, Anfang des Netz-Schlüssels und Gerätezahl bei auffälligen Netzen, Anfrage-Zähler); Gmail bei E-Mail-Kontakt.
+- **Empfänger:** Cloudflare (Auftragsverarbeiter); Spotify AB (Suchtext, Track-Kennung); Admin-Helfer (Wünsche ohne Geräte-ID; Anfang des Netz-Schlüssels und Gerätezahl bei auffälligen Netzen, nach einer Ungültigsetzung 7 Tage im Audit-Log; Anfrage-Zähler der letzten Stunde mit vollständigem Netz-Schlüssel bzw. Geräte-ID); Gmail bei E-Mail-Kontakt.
 - **Rechtsgrundlage für Speicher auf dem Gerät:** § 25 Abs. 2 Nr. 2 TDDDG (Abschnitt 5).
 
 ### 2.2 Adminbereich und Audit-Log
@@ -52,7 +52,7 @@ Für beide Einträge gilt: Verantwortlicher ist der Betreiber (`legal.controller
   - Spotify: Anzeigename des verbundenen Kontos im Audit-Log, Zugangsschlüssel verschlüsselt in `kv`, abgespielte Titel (`observed_plays`, `spotify_snapshot`), Cookie `__Host-oauth`.
   - Konto-Nummer in `ledger_entries`, `wishes.decided_by`, `settings` und `displays`.
   - Optional Cloudflare Access: Identität und Cookie `CF_Authorization` verarbeitet Cloudflare, die App prüft nur das Token.
-- **Empfänger:** Cloudflare; Spotify beim Verbinden des Kontos; alle Admins sehen die Admin-Liste und das Audit-Log ohne Netz-Schlüssel; die Buchhaltung des Ausrichters erhält das Verbrauchsprotokoll mit „Erfasst von“.
+- **Empfänger:** Cloudflare; Spotify beim Verbinden des Kontos; alle Admins sehen die Admin-Liste, das Audit-Log ohne Netz-Schlüssel und die Anmelde-Zähler der letzten Stunde mit Netz-Schlüssel bzw. Benutzername; die Buchhaltung des Ausrichters erhält das Verbrauchsprotokoll mit „Erfasst von“.
 
 ## 3. Technische und organisatorische Maßnahmen (Art. 32 DSGVO)
 
@@ -103,7 +103,7 @@ Nutzen: Ein kompromittierter Löschlauf kann keine Pages-Deployments ändern. Au
 
 ## 4. Interessenabwägung (Art. 6 Abs. 1 lit. f DSGVO)
 
-Für alle Verarbeitungen gilt: Die Teilnahme ist freiwillig, es werden keine Namen erhoben, Gästedaten werden 7 Tage nach der letzten Aktivität gelöscht oder anonymisiert, und Gäste können ihre Daten jederzeit selbst löschen. Die meisten Gäste und Admin-Helfer sind Beschäftigte der GmbH. Der Betreiber ist nicht ihr Arbeitgeber, und die GmbH erhält keine Gästedaten. Ergebnis jeweils: Das Interesse des Betreibers überwiegt **[plausibel]**.
+Für alle Verarbeitungen gilt: Die Teilnahme ist freiwillig, es werden keine Namen erhoben, Gästedaten werden 7 Tage nach der letzten Aktivität gelöscht oder anonymisiert, und Gäste können ihre Daten selbst löschen, solange ihr Geräte-Cookie gilt (höchstens 24 h). Die meisten Gäste und Admin-Helfer sind Beschäftigte der GmbH. Der Betreiber ist nicht ihr Arbeitgeber, und die GmbH erhält keine Gästedaten. Ergebnis jeweils: Das Interesse des Betreibers überwiegt **[plausibel]**.
 
 **a) Auslieferung der App (Hosting)**
 
@@ -121,7 +121,7 @@ Für alle Verarbeitungen gilt: Die Teilnahme ist freiwillig, es werden keine Nam
 
 - Interesse: Mehrfachabstimmung durch Cookie-Löschen erschweren, Überlastung abwehren.
 - Erforderlichkeit: Das Cookie allein lässt sich löschen. Bot-Challenge und Fingerprint wurden bewusst entfernt, IPv6 wird nur als Präfix verwendet.
-- Abwägung: Pseudonymisierung per HMAC, keine Klartext-IP, Zähler nach 24 h gelöscht, im Admin nur der Anfang des Schlüssels sichtbar. Geteilte Adressen (Mobilfunk-CGNAT) können legitime Stimmen ablehnen, die Limits sind deshalb einstellbar. Keine Entscheidung nach Art. 22 DSGVO, weil eine abgelehnte Stimme nicht erheblich beeinträchtigt.
+- Abwägung: Pseudonymisierung per HMAC, keine Klartext-IP, Zähler nach 24 h gelöscht, bei auffälligen Netzen nur der Anfang des Schlüssels sichtbar. Die Zähler-Liste der letzten Stunde zeigt den vollständigen Schlüssel, damit Admins Sperren lösen können. Geteilte Adressen (Mobilfunk-CGNAT) können legitime Stimmen ablehnen, die Limits sind deshalb einstellbar. Keine Entscheidung nach Art. 22 DSGVO, weil eine abgelehnte Stimme nicht erheblich beeinträchtigt.
 
 **d) Abstimmung einschließlich Ungültigsetzung**
 
@@ -177,6 +177,7 @@ Für alle Verarbeitungen gilt: Die Teilnahme ist freiwillig, es werden keine Nam
 | -------------------------------------------------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | Cookie `__Host-fete`                                                                   | beim Beitritt gesetzt, bei jeder Gast-Anfrage gelesen       | Abs. 2 Nr. 2: unbedingt erforderlich für die Teilnahme, die der Gast durch das Scannen ausdrücklich wünscht **[plausibel]** |
 | Local Storage `lang`                                                                   | nur nach Tippen auf DE oder EN, nur lokal gelesen           | Abs. 2 Nr. 2 **[plausibel]**                                                                                                |
+| `navigator.language`                                                                   | per JavaScript gelesen, wenn `lang` fehlt; nicht übertragen | Abs. 2 Nr. 2: nur zur Anzeige in der Sprache des Gastes **[plausibel]**                                                     |
 | `__Host-admin`, `__Host-oauth`, Session Storage `admin-invite-token`, `__Host-display` | Anmeldung bzw. Absicherung der jeweils gewünschten Funktion | Abs. 2 Nr. 2                                                                                                                |
 | Cookie `CF_Authorization`                                                              | nur mit Cloudflare Access, nur Adminbereich                 | Abs. 2 Nr. 2 **[plausibel]**                                                                                                |
 
@@ -187,22 +188,22 @@ Für alle Verarbeitungen gilt: Die Teilnahme ist freiwillig, es werden keine Nam
 
 ## 6. Löschkonzept
 
-| Daten                             | Frist                                 | ab                             | Umsetzung                                                      |
-| --------------------------------- | ------------------------------------- | ------------------------------ | -------------------------------------------------------------- |
-| Stimmen (`votes`)                 | 7 Tage                                | letzte Änderung                | gelöscht                                                       |
-| Geräteeintrag (`devices`)         | 7 Tage                                | letzter Beitritt               | gelöscht                                                       |
-| Wünsche (`wishes.device_id`)      | 7 Tage                                | Anlage                         | anonymisiert, Wunsch bleibt                                    |
-| Unterstützungen (`wish_upvotes`)  | 7 Tage                                | Anlage                         | Geräte-ID und Netz-Schlüssel entfernt                          |
-| Suchcache (`search_cache`)        | 24 h                                  | Abruf                          | gelöscht                                                       |
-| Anfrage-Zähler (`rate_limits`)    | 24 h                                  | Fensterbeginn                  | gelöscht, laufende Sperren bleiben                             |
-| Netz-Schlüssel im Audit-Log       | 7 Tage                                | Eintrag                        | entfernt                                                       |
-| Audit-Log                         | 90 Tage                               | Eintrag                        | gelöscht                                                       |
-| Admin-Sitzungen                   | Ablauf (12 h) oder 2 h ohne Aktivität |                                | beim nächsten Lauf gelöscht                                    |
-| Einladungen                       | 90 Tage                               | Ablauf                         | gelöscht                                                       |
-| Deaktivierte Admin-Konten         | 90 Tage                               | letzte Anmeldung, sonst Anlage | gelöscht, Recovery-Codes und Sitzungen per `ON DELETE CASCADE` |
-| Gast-Cookie                       | höchstens 24 h                        | erster Scan                    | Ablauf im Browser                                              |
-| E-Mails                           | bis zur Erledigung                    |                                | manuell                                                        |
-| Gelöschte Daten in D1 Time Travel | 7 Tage (Workers Free)                 | Löschung                       | durch Cloudflare, nicht abschaltbar                            |
+| Daten                             | Frist                                 | ab                             | Umsetzung                                                                                                                                                            |
+| --------------------------------- | ------------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stimmen (`votes`)                 | 7 Tage                                | letzte Änderung                | gelöscht                                                                                                                                                             |
+| Geräteeintrag (`devices`)         | 7 Tage                                | letzter Beitritt               | gelöscht                                                                                                                                                             |
+| Wünsche (`wishes.device_id`)      | 7 Tage                                | Anlage                         | anonymisiert, Wunsch bleibt                                                                                                                                          |
+| Unterstützungen (`wish_upvotes`)  | 7 Tage                                | Anlage                         | Geräte-ID und Netz-Schlüssel entfernt                                                                                                                                |
+| Suchcache (`search_cache`)        | 24 h                                  | Abruf                          | gelöscht                                                                                                                                                             |
+| Anfrage-Zähler (`rate_limits`)    | 24 h                                  | Fensterbeginn                  | gelöscht, laufende Sperren bleiben                                                                                                                                   |
+| Netz-Schlüssel im Audit-Log       | 7 Tage                                | Eintrag                        | entfernt                                                                                                                                                             |
+| Audit-Log                         | 90 Tage                               | Eintrag                        | gelöscht                                                                                                                                                             |
+| Admin-Sitzungen                   | Ablauf (12 h) oder 2 h ohne Aktivität |                                | beim nächsten Lauf gelöscht                                                                                                                                          |
+| Einladungen                       | 90 Tage                               | Ablauf                         | gelöscht                                                                                                                                                             |
+| Deaktivierte Admin-Konten         | 90 Tage                               | letzte Anmeldung, sonst Anlage | gelöscht, Recovery-Codes und Sitzungen per `ON DELETE CASCADE`; liegt die Anmeldung länger zurück, schon beim nächsten Lauf nach der Sperre (Hinweis unter „Admins“) |
+| Gast-Cookie                       | höchstens 24 h                        | erster Scan                    | Ablauf im Browser                                                                                                                                                    |
+| E-Mails                           | bis zur Erledigung                    |                                | manuell                                                                                                                                                              |
+| Gelöschte Daten in D1 Time Travel | 7 Tage (Workers Free)                 | Löschung                       | durch Cloudflare, nicht abschaltbar                                                                                                                                  |
 
 **Mechanismus**
 
@@ -210,7 +211,7 @@ Für alle Verarbeitungen gilt: Die Teilnahme ist freiwillig, es werden keine Nam
 - Täglich um 04:23 UTC führt der Workflow „Datenlöschung“ (`.github/workflows/retention.yml`) `RETENTION_SQL` mit `wrangler d1 execute --remote --command` aus. Die Löschung kann daher bis zu einen Tag nach Fristablauf erfolgen.
 - Nachweis: Das letzte Statement setzt `retention_run` in `kv`; der Workflow prüft den Zeitstempel. Bei Fehlern legt er ein Issue an, das Dashboard warnt nach 48 h ohne Lauf. Wegen der 60-Tage-Regel für Schedules in öffentlichen Repos gibt es Prüftermine in der Event-Checkliste (Fete −7, +8 und +91 Tage).
 - „Eventdaten bereinigen“ (Owner, erneute 2FA) wendet dieselbe Liste mit Stichtag „jetzt“ für alle Gästedaten an.
-- „Meine Daten auf diesem Gerät löschen“ (`POST /api/public/forget`) löscht sofort Stimmen, Geräteeintrag, Zähler der Geräte-ID und Cookie und anonymisiert Wünsche und Unterstützungen des Geräts.
+- „Meine Daten auf diesem Gerät löschen“ (`POST /api/public/forget`) löscht sofort Stimmen, Unterstützungen, Geräteeintrag, Zähler der Geräte-ID und Cookie und anonymisiert die Wünsche des Geräts. Der Button steht nur bereit, solange das Geräte-Cookie gilt (höchstens 24 h). Gast-Endpunkte verlangen einen vorhandenen Geräteeintrag, ein zurückbehaltenes Cookie wirkt nach der Löschung also nicht mehr.
 
 **Ohne feste Frist** bleiben, weil für Abrechnung und Ablauf der Fete gebraucht: Buchungen, Einstellungen, Displays, Songs und Sets, anonymisierte Wünsche, abgespielte Titel (`observed_plays`, `spotify_snapshot`) und die Spotify-Zugangsschlüssel bis zur Trennung.
 
@@ -230,7 +231,7 @@ Für alle Verarbeitungen gilt: Die Teilnahme ist freiwillig, es werden keine Nam
 ## 7. Cloudflare: Auftragsverarbeitung und Unterauftragsverarbeiter
 
 - **Vertrag:** Cloudflare Customer DPA v6.4 (gültig ab 03.04.2026), einbezogen über das Self-Serve Subscription Agreement, auch im Free-Plan **[plausibel]**. Vertragspartner ist der Inhaber des Cloudflare-Kontos, hier der Betreiber privat; das passt zu seiner Rolle als Verantwortlicher **[plausibel]**. Quellen: https://www.cloudflare.com/cloudflare-customer-dpa/, https://www.cloudflare.com/terms/
-- **Drittland (DPA Ziff. 6):** EU-U.S. Data Privacy Framework (Durchführungsbeschluss (EU) 2023/1795), hilfsweise Standardvertragsklauseln (Durchführungsbeschluss (EU) 2021/914, Modul 2). Das EuG hat die Klage gegen den DPF am 03.09.2025 abgewiesen (T-553/23); das Rechtsmittel C-703/25 P ist anhängig, ob inzwischen entschieden ist **[unsicher]**.
+- **Drittland (DPA Ziff. 6):** USA: EU-U.S. Data Privacy Framework (Durchführungsbeschluss (EU) 2023/1795), hilfsweise Standardvertragsklauseln (Durchführungsbeschluss (EU) 2021/914, Modul 2). Andere Drittländer ohne Angemessenheitsbeschluss: Standardvertragsklauseln (DPA Ziff. 1.1(p) und 6.2). Die Klauseln sind per Verweis einbezogen, nicht angehängt (am 16.10.2026 nachgelesen). Das EuG hat die Klage gegen den DPF am 03.09.2025 abgewiesen (T-553/23); das Rechtsmittel C-703/25 P ist anhängig, ob inzwischen entschieden ist **[unsicher]**.
 - **Unterauftragsverarbeiter:** https://www.cloudflare.com/gdpr/subprocessors/cloudflare-services/ (bei der Recherche Stand 01.10.2025). Änderungen kündigt Cloudflare 30 Tage vorher an, Widerspruch binnen 10 Tagen. Der Betreiber prüft die Liste vor jedem Event.
 - **Ablage (privat, nicht im Repo):** DPA als PDF mit Annahmedatum, Unterauftragsverarbeiter-Liste mit Datum, Prüfung des DPF-Eintrags „Cloudflare, Inc.“ auf https://www.dataprivacyframework.gov/ mit Datum.
 - **D1-Standort:** ungeprüft, `npx wrangler d1 info fete`. Eine EU-Jurisdiktion ginge nur über eine neue Datenbank (`--jurisdiction=eu`) und ist nicht geplant.
@@ -249,7 +250,7 @@ Für alle Verarbeitungen gilt: Die Teilnahme ist freiwillig, es werden keine Nam
 ## 9. Betroffenenanfragen
 
 - **Eingang:** E-Mail an die Adresse in `legal.controller`. Antwort unverzüglich, spätestens innerhalb eines Monats (Art. 12 Abs. 3 DSGVO). Anfrage und Antwort in der privaten Ablage festhalten.
-- **Gäste:** Bekannt ist nur die zufällige Geräte-ID im Cookie. Ohne zusätzliche Angaben lässt sich eine Anfrage keinem Gerät zuordnen (Art. 11 Abs. 2 DSGVO). Auf den Button „Meine Daten auf diesem Gerät löschen“ verweisen, der auch einen Widerspruch nach Art. 21 sofort umsetzt. Ohne Button werden die Daten 7 Tage nach der letzten Aktivität gelöscht bzw. anonymisiert, mit dem täglichen Lauf bis zu einen Tag später.
+- **Gäste:** Bekannt ist nur die zufällige Geräte-ID im Cookie. Ohne zusätzliche Angaben lässt sich eine Anfrage keinem Gerät zuordnen (Art. 11 Abs. 2 DSGVO). Auf den Button „Meine Daten auf diesem Gerät löschen“ verweisen, der auch einen Widerspruch nach Art. 21 sofort umsetzt, aber nur, solange das Geräte-Cookie gilt (höchstens 24 h). Ohne Button werden die Daten 7 Tage nach der letzten Aktivität gelöscht bzw. anonymisiert, mit dem täglichen Lauf bis zu einen Tag später.
 - **Admins:** Auskunft aus `admin_users`, `admin_invites`, `audit_log` (Konto-Nummer und Einträge mit dem Benutzernamen), `ledger_entries`, `wishes.decided_by`, `settings` und `displays`. Löschung nach Abschnitt 6, Widerspruch durch Deaktivieren.
 - **Inhaber des Party-Accounts:** `observed_plays`, `spotify_snapshot` und Anzeigename im Audit-Log. „Spotify trennen“ im Admin löscht die Zugangsschlüssel.
 - Kein Recht auf Datenübertragbarkeit, weil alle Verarbeitungen auf lit. f beruhen.
@@ -292,15 +293,16 @@ Die DSFA-Muss-Liste der Aufsichtsbehörden für den nicht-öffentlichen Bereich 
    - Dashboard, „Voting & Queue“ und „Wünsche“ zeigen Spotify-Daten ohne Spotify-Logo.
    - Fällt der Cover-Proxy aus, fehlt am TV das Cover während der Wiedergabe (Developer Policy II 5).
    - Nutzung im Firmenkontext: Developer Terms III.1.1 („private personal use“), Developer Policy III.10.
+   - Kein Hinweis, dass Spotify Drittbegünstigter von Nutzungsbedingungen und Datenschutzerklärung ist (Developer Terms V.11(e)); wie die Nutzungsbedingungen nicht umgesetzt.
 8. **Mehrfachabstimmung:** Wer Cookies löscht und das Netz wechselt, kann mehrfach abstimmen.
 9. **Drittland und Cloudflare:** DPF-Rechtsmittel anhängig, Rolle von Cloudflare bei Network Data unklar, D1-Standort ungeprüft.
 10. **Daten ohne feste Frist:** `observed_plays`, `spotify_snapshot` und Buchungen mit Konto-Nummer. Ob für Buchungen Aufbewahrungspflichten gelten (§ 257 HGB, § 147 AO), ist ungeprüft. Nach Löschung eines Admin-Kontos ist „Erfasst von“ leer.
-11. **Gmail:** Rolle und Drittlandbezug von Google ungeprüft.
+11. **Gmail:** Rechtsträger, Rolle und Übermittlungsgrundlage von Google ungeprüft. Die Erklärung nennt nur die weltweite Verarbeitung laut Google-Datenschutzerklärung.
 
 ## 12. Offene Punkte vor dem Livegang
 
 - Rolle der GmbH klären (Restrisiko 1).
-- D1-Standort, Cloudflare-Plan (Time Travel), DPA, Unterauftragsverarbeiter und DPF-Eintrag prüfen und ablegen (Abschnitt 7).
+- D1-Standort, Cloudflare-Plan (Time Travel), DPA, Unterauftragsverarbeiter und DPF-Eintrag prüfen und ablegen (Abschnitt 7). Danach `legal.retention.restoreDays` bestätigen (bei Workers Paid 30), den D1-Standort in Abschnitt 6 der Erklärung nennen und `legal.updatedAt` aktualisieren.
 - Bild-Hosts in Produktion prüfen. Nur `https://i.scdn.co/image/<id>` läuft über den Proxy, andere Hosts zeigen den Platzhalter:
 
   ```bash
@@ -309,4 +311,5 @@ Die DSFA-Muss-Liste der Aufsichtsbehörden für den nicht-öffentlichen Bereich 
 
 - Bei eigener Domain die Zone-Funktionen prüfen (Event-Checkliste).
 - Inhaber des Spotify-Party-Accounts klären.
-- Datenschutzerklärung Abschnitt 11 um die Buchhaltung als Empfänger des Verbrauchsprotokolls („Erfasst von“) ergänzen.
+- Gmail klären (Restrisiko 11) und Abschnitte 3 k, 5 und 6 der Erklärung ergänzen.
+- Speicherdauer für Buchungen, Einstellungen, Bildschirme und Titelliste festlegen, Aufbewahrungspflichten prüfen (Restrisiko 10).

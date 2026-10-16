@@ -587,7 +587,7 @@ export function UsersPage() {
     <div className="flex flex-col gap-6">
       <PageTitle
         title="Admins"
-        subtitle="Jeder Admin hat einen eigenen Zugang mit Passwort und 2FA. Einladungen gelten 24 Stunden."
+        subtitle={`Jeder Admin hat einen eigenen Zugang mit Passwort und 2FA. Einladungen gelten 24 Stunden. Gesperrte Konten werden ${legal.retention.adminDays} Tage nach der letzten Anmeldung automatisch gelöscht; liegt diese schon länger zurück, beim nächsten täglichen Löschlauf.`}
       />
       <div className="grid gap-6 lg:grid-cols-[24rem_1fr]">
         <Card title={existing ? 'Zugang zurücksetzen' : 'Admin einladen'}>

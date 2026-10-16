@@ -516,6 +516,32 @@ describe('Löschung', () => {
     expect((await other.request('GET', '/api/public/state')).json.joined).toBe(true);
   });
 
+  it('nimmt das alte Cookie nach der Löschung nicht mehr an', async () => {
+    const h = new Harness();
+    const t = makeTrack(0);
+    await h.env.DB.batch([
+      h.env.DB.prepare(
+        'INSERT INTO songs (spotify_uri, isrc, title, artist, duration_ms, title_norm, artist_norm, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?3, ?4, 0)',
+      ).bind(t.uri, t.isrc, t.title, t.artist, t.durationMs),
+      h.env.DB.prepare("INSERT INTO wishes (song_id, device_id, status, created_at) VALUES (1, 'anon', 'approved', 0)"),
+    ]);
+    const guest = h.client('203.0.113.7');
+    const token = await presenceToken('test-qr-secret-0123456789', h.clock.time);
+    expect((await guest.request('POST', '/api/public/join', { json: { token } })).status).toBe(200);
+    const replay = h.client('203.0.113.7');
+    replay.cookies.set('__Host-fete', guest.cookies.get('__Host-fete')!);
+
+    expect((await guest.request('POST', '/api/public/wishes/1/upvote', { json: {} })).json).toEqual({ ok: true });
+    expect((await guest.request('POST', '/api/public/forget')).status).toBe(200);
+    expect((await replay.request('POST', '/api/public/wishes/1/upvote', { json: {} })).status).toBe(401);
+    expect((await replay.request('POST', '/api/public/join', { json: {} })).json.error).toBe('qr_expired');
+    expect((await replay.request('GET', '/api/public/state')).json.joined).toBe(false);
+    const upvotes = await h.env.DB.prepare('SELECT COUNT(*) AS n FROM wish_upvotes').first<{ n: number }>();
+    expect(upvotes?.n).toBe(0);
+    const device = await h.env.DB.prepare('SELECT COUNT(*) AS n FROM devices').first<{ n: number }>();
+    expect(device?.n).toBe(0);
+  });
+
   it('löscht per Admin-Button alle Gästedaten, die eigene Session bleibt', async () => {
     const h = new Harness();
     const { client: owner } = await createOwner(h);

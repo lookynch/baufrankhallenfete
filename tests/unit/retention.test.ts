@@ -242,7 +242,6 @@ describe('Gast-Löschung (forgetDeviceStatements)', () => {
     ]);
     expect(await rows(db, 'SELECT wish_id, device_id, ip_key FROM wish_upvotes ORDER BY wish_id')).toEqual([
       { wish_id: 1, device_id: 'abc', ip_key: 'ip' },
-      { wish_id: 2, device_id: expect.stringMatching(/^anon-\d+$/), ip_key: null },
     ]);
     expect(await rows(db, 'SELECT key FROM rate_limits ORDER BY key')).toEqual([
       { key: 'vote-device:abc' },

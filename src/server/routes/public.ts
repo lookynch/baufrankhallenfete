@@ -33,8 +33,15 @@ function clientNetwork(c: AppContext) {
   return ipKeyHash(c.env.IP_HASH_SECRET, clientIp(c));
 }
 
+async function currentGuest(c: AppContext, now: number): Promise<GuestIdentity | null> {
+  const guest = await decodeGuest(c.env.COOKIE_SECRET, getCookie(c, GUEST_COOKIE), now);
+  if (!guest) return null;
+  const device = await c.env.DB.prepare('SELECT 1 AS x FROM devices WHERE id = ?1').bind(guest.deviceId).first();
+  return device ? guest : null;
+}
+
 async function requireGuest(c: AppContext): Promise<GuestIdentity> {
-  const guest = await decodeGuest(c.env.COOKIE_SECRET, getCookie(c, GUEST_COOKIE), c.var.rt.now());
+  const guest = await currentGuest(c, c.var.rt.now());
   if (!guest) fail(401, 'not_joined');
   return guest;
 }
@@ -59,7 +66,7 @@ publicRoutes.post('/join', async (c) => {
   const ip = await clientNetwork(c);
   await limit(c, 'join', 300, 600, ip.hash);
   const input = await body(c, z.object({ token: z.string().max(16).optional() }));
-  const existing = await decodeGuest(c.env.COOKIE_SECRET, getCookie(c, GUEST_COOKIE), now);
+  const existing = await currentGuest(c, now);
   if (!existing) {
     if (!input.token || !(await verifyPresenceToken(c.env.QR_SECRET, input.token, now))) fail(403, 'qr_expired');
     if (ip.netHash !== ip.hash) await limit(c, 'join-net', 300, 600, ip.netHash);
@@ -74,10 +81,10 @@ publicRoutes.post('/join', async (c) => {
     expiresAt: existing ? Math.min(existing.expiresAt, fresh) : fresh,
   };
   await c.env.DB.prepare(
-    `INSERT INTO devices (id, created_at, ip_key, last_seen_at) VALUES (?1, ?2, ?3, ?2)
-     ON CONFLICT (id) DO UPDATE SET ip_key = excluded.ip_key, last_seen_at = excluded.last_seen_at`,
+    `INSERT INTO devices (id, created_at, last_seen_at) VALUES (?1, ?2, ?2)
+     ON CONFLICT (id) DO UPDATE SET last_seen_at = excluded.last_seen_at`,
   )
-    .bind(identity.deviceId, now, ip.hash)
+    .bind(identity.deviceId, now)
     .run();
   setCookie(c, GUEST_COOKIE, await encodeGuest(c.env.COOKIE_SECRET, identity), {
     path: '/',
@@ -99,9 +106,9 @@ publicRoutes.post('/forget', async (c) => {
 publicRoutes.get('/state', async (c) => {
   const rt = c.var.rt;
   const now = rt.now();
-  const decoded = await decodeGuest(c.env.COOKIE_SECRET, getCookie(c, GUEST_COOKIE), now);
+  const guest = await currentGuest(c, now);
   const settings = await loadSettings(c.env.DB, now);
-  if (!decoded) {
+  if (!guest) {
     return c.json({ joined: false, now, eventName: settings.event.name, pollAfterMs: MAX_GUEST_POLL_MS });
   }
   rt.waitUntil(tick(rt));
@@ -120,7 +127,7 @@ publicRoutes.get('/state', async (c) => {
       view && !covers
         ? { ...view, candidates: view.candidates.map((candidate) => ({ ...candidate, imageUrl: null })) }
         : view,
-    myVote: round ? await myVote(c.env.DB, round.id, decoded.deviceId) : null,
+    myVote: round ? await myVote(c.env.DB, round.id, guest.deviceId) : null,
     nowPlaying: track
       ? { uri: track.uri, title: track.title, artist: track.artist, imageUrl: covers ? track.imageUrl : null }
       : null,
