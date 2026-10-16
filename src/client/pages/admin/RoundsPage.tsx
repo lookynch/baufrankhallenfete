@@ -22,7 +22,7 @@ interface RoundsData {
       wishKey: string | null;
     }>;
   } | null;
-  suspicious: Array<{ ip_key: string; devices: number; fingerprints: number; verified: number }>;
+  suspicious: Array<{ ip_key: string; devices: number }>;
   recent: Array<{
     id: number;
     seq: number;
@@ -188,9 +188,7 @@ export function RoundsPage() {
                 {data.suspicious.map((s) => (
                   <li key={s.ip_key} className="flex items-center justify-between gap-2 rounded-xl bg-raised/50 p-2">
                     <span className="font-mono">{s.ip_key}…</span>
-                    <span className="text-muted">
-                      {s.devices} Geräte · {s.fingerprints} Signaturen · {s.verified} verifiziert
-                    </span>
+                    <span className="text-muted">{s.devices} Geräte</span>
                     {round ? (
                       <Button
                         size="sm"

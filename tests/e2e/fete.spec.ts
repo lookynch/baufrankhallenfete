@@ -1,17 +1,27 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
-import { devices, expect, test, type Page } from '@playwright/test';
+import { devices, expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { totpCode } from '../../src/server/security/totp.ts';
 
 const root = join(import.meta.dirname, '..', '..');
 const shots = join(root, 'test-results', 'screens');
 const cspErrors: string[] = [];
+const requests: string[] = [];
+const pixel = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+  'base64',
+);
 
 function watchConsole(page: Page) {
   page.on('console', (message) => {
     if (message.type() === 'error' && /Content Security Policy|Refused to/i.test(message.text()))
       cspErrors.push(message.text());
   });
+}
+
+async function watchNetwork(context: BrowserContext) {
+  context.on('request', (request) => requests.push(request.url()));
+  await context.route('**/api/cover/*', (route) => route.fulfill({ contentType: 'image/png', body: pixel }));
 }
 
 function sql(command: string) {
@@ -50,19 +60,21 @@ async function adminFetch(page: Page, method: string, path: string, body?: unkno
   );
 }
 
-test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser }) => {
+test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser, baseURL }) => {
   const now = Date.now();
   const songs = Array.from({ length: 16 }, (_, i) => {
     const id = `e2esong${String(i).padStart(4, '0')}abcdefgh`;
-    return `('spotify:track:${id}', 'DEE2E${String(i).padStart(7, '0')}', 'Partysong ${i + 1}', 'Band ${i + 1}', ${180_000 + i * 5_000}, 'partysong ${i + 1}', 'band ${i + 1}', ${now})`;
+    const image = `https://i.scdn.co/image/ab67616d0000b273${String(i).padStart(24, '0')}`;
+    return `('spotify:track:${id}', 'DEE2E${String(i).padStart(7, '0')}', 'Partysong ${i + 1}', 'Band ${i + 1}', '${image}', ${180_000 + i * 5_000}, 'partysong ${i + 1}', 'band ${i + 1}', ${now})`;
   });
   sql(
-    `INSERT INTO songs (spotify_uri, isrc, title, artist, duration_ms, title_norm, artist_norm, created_at) VALUES ${songs.join(', ')};
+    `INSERT INTO songs (spotify_uri, isrc, title, artist, image_url, duration_ms, title_norm, artist_norm, created_at) VALUES ${songs.join(', ')};
      INSERT INTO sets (name, starts_at, ends_at, default_level, created_at) VALUES ('E2E-Set', ${now - 3_600_000}, ${now + 5 * 3_600_000}, 3, ${now});
      INSERT INTO set_songs (set_id, song_id, added_at) SELECT (SELECT id FROM sets WHERE name = 'E2E-Set'), id, ${now} FROM songs;`,
   );
 
   const adminContext = await browser.newContext();
+  await watchNetwork(adminContext);
   const admin = await adminContext.newPage();
   watchConsole(admin);
   await admin.goto('/admin/bootstrap');
@@ -75,6 +87,7 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser }) 
 
   await admin.goto(inviteLink!);
   await expect(admin.getByText('Admin-Zugang einrichten')).toBeVisible();
+  await expect(admin.locator('a[href="/datenschutz#admin"]').first()).toBeVisible();
   const secret = (await admin.locator('code').innerText()).trim();
   await admin.getByLabel('Neues Passwort').fill('Grüne Gurken tanzen Samba 7');
   await admin.getByLabel('Passwort wiederholen').fill('Grüne Gurken tanzen Samba 7');
@@ -86,6 +99,7 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser }) 
   await expect(admin.getByText('Wiederherstellungscodes sichern')).toBeVisible();
   await admin.getByRole('button', { name: /Codes gesichert/ }).click();
   await expect(admin.getByRole('heading', { name: 'Übersicht' })).toBeVisible();
+  await expect(admin.locator('aside a[href="/datenschutz#admin"]')).toBeVisible();
 
   const voting = await adminFetch(admin, 'PUT', '/api/admin/settings/voting', {
     startsAt: now - 60_000,
@@ -98,6 +112,7 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser }) 
   });
 
   const tvContext = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+  await watchNetwork(tvContext);
   const tv = await tvContext.newPage();
   watchConsole(tv);
   await tv.goto('/display');
@@ -115,6 +130,9 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser }) 
   const qr = tv.locator('[data-qr-url]');
   await expect(qr).toBeVisible({ timeout: 30_000 });
   await expect(tv.getByText(/Runde 1/)).toBeVisible({ timeout: 30_000 });
+  await expect(tv.locator('img[src^="/api/cover/"]').first()).toBeVisible();
+  await expect(tv.getByText(/^Datenschutz & Impressum: .+\/datenschutz$/)).toBeVisible();
+  await expect(tv.getByRole('img', { name: 'Musikdaten von Spotify' })).toBeVisible();
   const qrUrl = await qr.getAttribute('data-qr-url');
   expect(qrUrl).toMatch(/\/v\/[A-Z2-7]{8}$/);
 
@@ -123,21 +141,45 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser }) 
     ...iphone,
     locale: 'de-DE',
   });
+  await watchNetwork(guestContext);
   const guest = await guestContext.newPage();
   watchConsole(guest);
   await guest.goto(new URL(qrUrl!).pathname);
   await expect(guest).toHaveURL(/\/$/);
   await expect(guest.getByText('Welcher Song soll laufen?')).toBeVisible({ timeout: 20_000 });
+  const cover = guest.locator('ul li img').first();
+  await expect(cover).toHaveAttribute('src', /^\/api\/cover\/[0-9a-f]{40}$/);
+  await expect(cover).toHaveJSProperty('naturalWidth', 1);
+  await expect(guest.locator('img[src*="scdn"]')).toHaveCount(0);
+  const spotifyLink = guest.locator('ul li').first().getByRole('link', { name: 'Open Spotify' });
+  await expect(spotifyLink).toHaveAttribute('href', /^https:\/\/open\.spotify\.com\/track\/e2esong\d{4}abcdefgh$/);
+  await expect(spotifyLink).toHaveAttribute('target', '_blank');
+  await expect(spotifyLink).toHaveAttribute('rel', 'noopener noreferrer');
+  await expect(guest.locator('ul li button a')).toHaveCount(0);
+  await expect(guest.getByRole('img', { name: 'Musikdaten von Spotify' })).toBeVisible();
   await guest.screenshot({ path: join(shots, 'guest-vote.png'), fullPage: true });
   await guest.locator('ul li button').first().click();
   await expect(guest.getByText('Stimme gespeichert!')).toBeVisible();
-  await expect(guest.getByText('✓ Deine Stimme')).toBeVisible();
+  const mine = guest.getByText('✓ Deine Stimme');
+  await expect(mine).toBeVisible();
+  const chosen = guest.locator('ul li').filter({ has: guest.locator('button[aria-pressed="true"]') });
+  const [badgeBox, artBox] = await Promise.all([mine.boundingBox(), chosen.locator('img').boundingBox()]);
+  expect(badgeBox!.y).toBeGreaterThanOrEqual(artBox!.y + artBox!.height);
+  await guest.screenshot({ path: join(shots, 'guest-voted.png'), fullPage: true });
   await guest.getByRole('button', { name: /Wunsch/ }).click();
   await expect(guest.getByText('Dein Songwunsch')).toBeVisible();
+  await expect(guest.getByRole('img', { name: 'Musikdaten von Spotify' })).toBeVisible();
+  await expect(guest.getByRole('link', { name: 'Datenschutz' })).toBeVisible();
+  await expect(guest.getByRole('link', { name: 'Impressum' })).toBeVisible();
   await guest.screenshot({ path: join(shots, 'guest-wish.png'), fullPage: true });
 
   await expect(tv.getByText('Stimmen: 1')).toBeVisible({ timeout: 30_000 });
   await tv.screenshot({ path: join(shots, 'tv.png') });
+
+  guest.once('dialog', (dialog) => void dialog.accept());
+  await guest.getByRole('button', { name: 'Meine Daten auf diesem Gerät löschen' }).click();
+  await expect(guest.getByText('Scanne den QR-Code am Bildschirm')).toBeVisible();
+  expect((await guestContext.cookies()).map((cookie) => cookie.name)).not.toContain('__Host-fete');
 
   await admin.goto('/admin/ledger');
   await admin.getByRole('button', { name: /buchen/ }).click();
@@ -148,6 +190,7 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser }) 
   await admin.screenshot({ path: join(shots, 'admin-ledger.png'), fullPage: true });
 
   const barContext = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+  await watchNetwork(barContext);
   for (const kind of ['bar_stats', 'bar_ledger'] as const) {
     const bar = await barContext.newPage();
     watchConsole(bar);
@@ -167,6 +210,10 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser }) 
     await bar.screenshot({ path: join(shots, `${kind}.png`) });
   }
 
+  await admin.goto('/admin/music');
+  await expect(admin.getByRole('img', { name: 'Musikdaten von Spotify' })).toBeVisible();
+  await expect(admin.locator('[title^="Partysong"]').first()).toBeVisible();
+
   for (const path of [
     '/admin',
     '/admin/rounds',
@@ -182,4 +229,44 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser }) 
   }
 
   expect(cspErrors).toEqual([]);
+  expect(requests.some((url) => url.includes('/api/cover/'))).toBe(true);
+  const origin = new URL(baseURL!).origin;
+  expect(requests.filter((url) => /^https?:/.test(url) && new URL(url).origin !== origin)).toEqual([]);
+});
+
+test('Rechtsseiten: Links, Inhalte, Sprache und Anker ohne API-Aufrufe', async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ locale: 'de-DE' });
+  await watchNetwork(context);
+  const apiCalls: string[] = [];
+  context.on('request', (request) => {
+    if (new URL(request.url()).pathname.startsWith('/api/')) apiCalls.push(request.url());
+  });
+  const page = await context.newPage();
+  watchConsole(page);
+
+  await page.goto('/datenschutz#admin');
+  await expect(page.getByRole('heading', { name: 'Datenschutzerklärung' })).toBeVisible();
+  await expect(page.locator('#admin')).toBeInViewport();
+  await expect(page.getByText('Jakob Kaiser').first()).toBeAttached();
+  await page.getByRole('button', { name: /^en$/i }).click();
+  await expect(page.getByRole('heading', { name: 'Privacy policy' })).toBeVisible();
+  await page.getByRole('button', { name: /^de$/i }).click();
+  await page.getByRole('link', { name: 'Impressum' }).click();
+  await expect(page).toHaveURL(/\/impressum$/);
+  await expect(page.getByText('Altentrüdingen 48')).toBeVisible();
+  await page.getByRole('button', { name: 'Zurück' }).click();
+  await expect(page).toHaveURL(/\/datenschutz#admin$/);
+  expect(apiCalls).toEqual([]);
+
+  await page.goto('/');
+  await expect(page.getByText('Scanne den QR-Code am Bildschirm')).toBeVisible();
+  await expect(page.getByText(/^Privat betrieben von Jakob Kaiser\./)).toBeVisible();
+  await page.getByRole('link', { name: 'Datenschutz' }).click();
+  await expect(page).toHaveURL(/\/datenschutz$/);
+  await expect(page.getByText('Widerspruchsrecht nach Art. 21 DSGVO')).toBeVisible();
+  await page.screenshot({ path: join(shots, 'datenschutz.png'), fullPage: true });
+
+  expect(cspErrors).toEqual([]);
+  const origin = new URL(baseURL!).origin;
+  expect(requests.filter((url) => /^https?:/.test(url) && new URL(url).origin !== origin)).toEqual([]);
 });

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { z } from 'zod';
+import { legal } from '../../shared/legal.ts';
 import type { Settings } from '../../shared/settings.ts';
 import { body, clientIpHash, fail, type AppContext, type AppEnv } from '../http.ts';
 import { presenceToken } from '../security/presence.ts';
@@ -45,7 +46,7 @@ displayRoutes.post('/pair/poll', async (c) => {
     secure: true,
     httpOnly: true,
     sameSite: 'Strict',
-    maxAge: 60 * 24 * 3600,
+    maxAge: legal.cookies.displayDays * 24 * 3600,
   });
   return c.json({ status: 'paired', kind: result.kind });
 });
@@ -135,7 +136,7 @@ async function ledgerState(db: D1Database, settings: Settings, now: number) {
     totalCrates: stats.totalCrates,
     forecastCostCents: stats.forecastCostCents,
     costPerHourCents: Math.round(stats.ratePerHour * settings.ledger.cratePriceCents),
-    journal: await journal(db, 14),
+    journal: (await journal(db, 14)).map(({ created_by: _id, created_by_name: _name, ...entry }) => entry),
     balances: (await accountBalances(db)).filter((a) => a.debit_cents > 0 || a.credit_cents > 0),
   };
 }

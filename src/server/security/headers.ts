@@ -1,9 +1,8 @@
 export const contentSecurityPolicy = [
   "default-src 'self'",
-  "script-src 'self' https://challenges.cloudflare.com",
-  'frame-src https://challenges.cloudflare.com',
-  "connect-src 'self' https://challenges.cloudflare.com",
-  "img-src 'self' data: https://*.scdn.co https://*.spotifycdn.com",
+  "script-src 'self'",
+  "connect-src 'self'",
+  "img-src 'self' data:",
   "style-src 'self'",
   "font-src 'self'",
   "object-src 'none'",

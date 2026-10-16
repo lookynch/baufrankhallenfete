@@ -85,11 +85,6 @@ export function mapTrack(raw: RawTrack | null | undefined): SpotifyTrack | null 
   };
 }
 
-export function trackIdFromUri(uri: string): string | null {
-  const match = /^spotify:track:([A-Za-z0-9]{10,40})$/.exec(uri);
-  return match?.[1] ?? null;
-}
-
 export function parseSpotifyReference(input: string): { kind: 'track' | 'playlist'; id: string } | null {
   const trimmed = input.trim();
   const uri = /^spotify:(track|playlist):([A-Za-z0-9]{10,40})$/.exec(trimmed);

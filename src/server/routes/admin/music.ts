@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
+import { legal } from '../../../shared/legal.ts';
 import { moodLevelSchema } from '../../../shared/settings.ts';
 import { body, fail, idParam, query, type AppContext, type AppEnv } from '../../http.ts';
 import { randomToken, signValue, verifySignedValue } from '../../security/crypto.ts';
@@ -42,7 +43,7 @@ musicRoutes.post('/spotify/authorize', async (c) => {
     secure: true,
     httpOnly: true,
     sameSite: 'Lax',
-    maxAge: 600,
+    maxAge: legal.cookies.oauthMinutes * 60,
   });
   return c.json({ url: authorizeUrl(c.env, redirectUri(c), state) });
 });
@@ -332,11 +333,11 @@ musicRoutes.get('/rounds/current', async (c) => {
   const suspicious = round
     ? await db
         .prepare(
-          `SELECT ip_key, COUNT(*) AS devices, COUNT(DISTINCT fp_hash) AS fingerprints, SUM(verified) AS verified
+          `SELECT ip_key, COUNT(*) AS devices
            FROM votes WHERE round_id = ?1 AND invalidated = 0 GROUP BY ip_key HAVING COUNT(*) > 1 ORDER BY devices DESC LIMIT 20`,
         )
         .bind(round.id)
-        .all<{ ip_key: string; devices: number; fingerprints: number; verified: number }>()
+        .all<{ ip_key: string; devices: number }>()
     : { results: [] };
   const recent = await db
     .prepare('SELECT id, seq, status, mood_level, opened_at, closed_at FROM rounds ORDER BY seq DESC LIMIT 10')

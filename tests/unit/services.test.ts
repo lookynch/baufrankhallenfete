@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readBudget, refreshBudget, throttleFactor } from '../../src/server/services/budget.ts';
+import { guestCoversAllowed, readBudget, refreshBudget, throttleFactor } from '../../src/server/services/budget.ts';
 import { importTracks, saveSet, setCoverage } from '../../src/server/services/library.ts';
 import {
   authStatus,
@@ -129,7 +129,7 @@ describe('Spotify-Anbindung', () => {
 });
 
 describe('Budget-Wächter', () => {
-  it('liest die Tagesnutzung und drosselt ab 60 %', async () => {
+  it('liest die Tagesnutzung, drosselt ab 60 % und blendet Gast-Cover ab 80 % aus', async () => {
     const env = testEnv({ CF_ANALYTICS_TOKEN: 't', CF_ACCOUNT_ID: 'acc' });
     const { fetcher } = fakeFetch(() =>
       Response.json({ data: { viewer: { accounts: [{ data: [{ sum: { requests: 61_000 } }] }] } } }),
@@ -141,6 +141,11 @@ describe('Budget-Wächter', () => {
     expect(throttleFactor({ ...budget!, fraction: 0.85 }, NOW)).toBe(4);
     expect(throttleFactor(budget, NOW + 3_600_000)).toBe(1);
     expect(throttleFactor(null, NOW)).toBe(1);
+    expect(guestCoversAllowed(budget, NOW)).toBe(true);
+    expect(guestCoversAllowed({ ...budget!, fraction: 0.79 }, NOW)).toBe(true);
+    expect(guestCoversAllowed({ ...budget!, fraction: 0.8 }, NOW)).toBe(false);
+    expect(guestCoversAllowed({ ...budget!, fraction: 0.85 }, NOW + 3_600_000)).toBe(true);
+    expect(guestCoversAllowed(null, NOW)).toBe(true);
   });
 });
 

@@ -1,7 +1,7 @@
+import { trackIdFromUri } from '../../shared/spotify.ts';
 import { hitRateLimit } from '../security/ratelimit.ts';
 import { ensureSong, normalizeTitle } from './library.ts';
 import type { SpotifyApi, SpotifyTrack } from './spotify-api.ts';
-import { trackIdFromUri } from './spotify-api.ts';
 
 export class WishError extends Error {}
 
@@ -152,6 +152,7 @@ export async function upvoteWish(
 export interface WishView {
   id: number;
   key: string;
+  uri: string;
   status: string;
   title: string;
   artist: string;
@@ -165,7 +166,7 @@ export interface WishView {
 export async function guestWishes(db: D1Database, deviceId: string): Promise<WishView[]> {
   const { results } = await db
     .prepare(
-      `SELECT w.id, w.status, w.created_at, s.title, s.artist, s.image_url,
+      `SELECT w.id, w.status, w.created_at, s.spotify_uri AS uri, s.title, s.artist, s.image_url,
               (SELECT COUNT(*) FROM wish_upvotes u WHERE u.wish_id = w.id) AS upvotes,
               (w.device_id = ?1) AS mine,
               EXISTS (SELECT 1 FROM wish_upvotes u WHERE u.wish_id = w.id AND u.device_id = ?1) AS upvoted

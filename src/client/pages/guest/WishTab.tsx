@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Cover } from '../../components/music.tsx';
+import { Cover, SpotifyLink, SpotifyLogo } from '../../components/music.tsx';
 import { Badge, Button, Empty, Input, Notice, Spinner } from '../../components/ui.tsx';
 import { api, ApiError } from '../../lib/api.ts';
 import { hasMessage, useI18n, type MessageKey } from '../../lib/i18n.tsx';
@@ -16,6 +16,7 @@ interface Track {
 interface Wish {
   id: number;
   key: string;
+  uri: string;
   status: 'open' | 'approved' | 'rejected' | 'played';
   title: string;
   artist: string;
@@ -135,9 +136,10 @@ export function WishTab({ toast }: { toast: (message: string, tone?: 'success' |
             <li key={track.uri} className="flex items-center gap-3 rounded-2xl bg-surface p-2.5 ring-1 ring-line">
               <Cover src={track.imageUrl} size={52} />
               <div className="min-w-0 flex-1">
-                <div className="truncate font-semibold">{track.title}</div>
-                <div className="truncate text-sm text-muted">{track.artist}</div>
+                <div className="font-semibold break-words">{track.title}</div>
+                <div className="text-sm break-words text-muted">{track.artist}</div>
               </div>
+              <SpotifyLink uri={track.uri} />
               <Button size="sm" busy={busy === track.uri} onClick={() => void wish(track)}>
                 {t('guest.wish.send')}
               </Button>
@@ -145,6 +147,7 @@ export function WishTab({ toast }: { toast: (message: string, tone?: 'success' |
           ))}
         </ul>
       ) : null}
+      <SpotifyLogo className="self-center" />
 
       <WishList title={t('guest.wish.mine')} wishes={mine} />
       <WishList title={t('guest.wish.public')} wishes={others} onUpvote={upvote} busy={busy} />
@@ -179,9 +182,10 @@ function WishList({
                   <span className="font-mono text-xs font-bold text-accent">{w.key}</span>
                   <Badge tone={statusTone[w.status]}>{t(`status.${w.status}` as MessageKey)}</Badge>
                 </div>
-                <div className="truncate font-semibold">{w.title}</div>
-                <div className="truncate text-xs text-muted">{w.artist}</div>
+                <div className="font-semibold break-words">{w.title}</div>
+                <div className="text-xs break-words text-muted">{w.artist}</div>
               </div>
+              <SpotifyLink uri={w.uri} />
               {onUpvote && w.status === 'approved' ? (
                 <Button
                   size="sm"

@@ -198,14 +198,12 @@ describe('Stimmen', () => {
     return db;
   }
   const settings = defaultSettings(0);
-  const vote = (deviceId: string, ipKey: string, songId = 1, verified = true, ipFamily: 'v4' | 'v6' = 'v6') => ({
+  const vote = (deviceId: string, ipKey: string, songId = 1, ipFamily: 'v4' | 'v6' = 'v6') => ({
     roundId: 1,
     songId,
     deviceId,
     ipKey,
     ipFamily,
-    verified,
-    fpHash: null,
     now: 1,
   });
 
@@ -221,15 +219,13 @@ describe('Stimmen', () => {
     expect(row?.song_id).toBe(2);
   });
 
-  it('erlaubt mehrere Geräte hinter geteilter IPv4, unverifizierte nur eins', async () => {
+  it('erlaubt mehrere Geräte hinter geteilter IPv4 bis zum Limit', async () => {
     const db = await roundWithCandidates();
-    expect(ipVoteLimit(settings, 'v4', true)).toBe(3);
-    expect(ipVoteLimit(settings, 'v4', false)).toBe(1);
-    expect(await castVote(db, settings, vote('d1', 'nat', 1, true, 'v4'))).toBe('ok');
-    expect(await castVote(db, settings, vote('d2', 'nat', 1, false, 'v4'))).toBe('ip_limit');
-    expect(await castVote(db, settings, vote('d3', 'nat', 1, true, 'v4'))).toBe('ok');
-    expect(await castVote(db, settings, vote('d4', 'nat', 1, true, 'v4'))).toBe('ok');
-    expect(await castVote(db, settings, vote('d5', 'nat', 1, true, 'v4'))).toBe('ip_limit');
+    expect(ipVoteLimit(settings, 'v4')).toBe(3);
+    expect(await castVote(db, settings, vote('d1', 'nat', 1, 'v4'))).toBe('ok');
+    expect(await castVote(db, settings, vote('d2', 'nat', 1, 'v4'))).toBe('ok');
+    expect(await castVote(db, settings, vote('d3', 'nat', 1, 'v4'))).toBe('ok');
+    expect(await castVote(db, settings, vote('d4', 'nat', 1, 'v4'))).toBe('ip_limit');
   });
 
   it('lehnt Stimmen für geschlossene Runden und Nicht-Kandidaten ab', async () => {

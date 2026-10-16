@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { Button, Notice, Spinner, useToast } from '../../components/ui.tsx';
+import { Button, LanguageSwitch, Spinner, useToast } from '../../components/ui.tsx';
 import { api, ApiError } from '../../lib/api.ts';
-import { passiveFingerprint } from '../../lib/fingerprint.ts';
 import { useI18n, type MessageKey } from '../../lib/i18n.tsx';
 import { usePolling } from '../../lib/polling.ts';
 import { theme } from '../../lib/theme.ts';
-import { turnstileToken } from '../../lib/turnstile.ts';
+import { legal } from '../../../shared/legal.ts';
+import { LegalLinks } from '../legal/LegalPages.tsx';
 import { VoteTab, type GuestState } from './VoteTab.tsx';
 import { WishTab } from './WishTab.tsx';
 
@@ -19,10 +19,6 @@ export function guestErrorKey(error: unknown): MessageKey {
     if (GUEST_ERRORS.includes(error.code)) return `guest.error.${error.code}` as MessageKey;
   }
   return 'guest.error.generic';
-}
-
-async function verifyDevice(siteKey: string | null): Promise<string | undefined> {
-  return turnstileToken(siteKey).catch(() => undefined);
 }
 
 export function JoinPage() {
@@ -43,9 +39,7 @@ export function JoinPage() {
     };
     void (async () => {
       try {
-        const config = await api.get<{ turnstileSiteKey: string | null }>('/api/public/config');
-        const turnstile = await verifyDevice(config.turnstileSiteKey);
-        await api.post('/api/public/join', { token, turnstile, fingerprint: passiveFingerprint() });
+        await api.post('/api/public/join', { token });
         navigate('/', { replace: true });
       } catch (e) {
         if (e instanceof ApiError && e.code === 'qr_expired') {
@@ -98,11 +92,18 @@ export function JoinPage() {
   );
 }
 
+const privacyParams = { name: legal.controller.name, days: legal.retention.guestDays };
+
 function CenteredMessage({ children }: { children: React.ReactNode }) {
+  const { t } = useI18n();
   return (
     <main className="bg-party flex min-h-dvh flex-col items-center justify-center gap-5 px-6 text-center">
       <img src={theme.event.logo} alt="" className="h-16 w-16" />
       {children}
+      <footer className="mt-6 flex max-w-sm flex-col gap-2 text-xs leading-relaxed text-muted/80">
+        <p>{t('privacy.short', privacyParams)}</p>
+        <LegalLinks />
+      </footer>
     </main>
   );
 }
@@ -115,50 +116,22 @@ function ScanIcon() {
   );
 }
 
-function LanguageSwitch() {
-  const { lang, setLang } = useI18n();
-  return (
-    <div className="flex rounded-full bg-raised p-1 text-xs font-semibold ring-1 ring-line">
-      {(['de', 'en'] as const).map((l) => (
-        <button
-          key={l}
-          type="button"
-          onClick={() => setLang(l)}
-          className={`rounded-full px-3 py-1 uppercase ${lang === l ? 'bg-primary text-on-primary' : 'text-muted'}`}
-        >
-          {l}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 export function GuestApp() {
   const { t } = useI18n();
   const [tab, setTab] = useState<'vote' | 'wish'>('vote');
   const toast = useToast();
   const load = useCallback(() => api.get<GuestState>('/api/public/state'), []);
   const { data, error, offline, offsetMs, refresh } = usePolling(load, { pauseHidden: true });
-  const [verifying, setVerifying] = useState(false);
-  const [verifyAttempted, setVerifyAttempted] = useState(false);
-  const autoVerified = useRef(false);
-  const siteKey = data?.joined && data.verified === false ? (data.turnstileSiteKey ?? null) : null;
 
-  const verify = useCallback(async () => {
-    if (!siteKey) return;
-    setVerifying(true);
-    const turnstile = await verifyDevice(siteKey);
-    if (turnstile) await api.post('/api/public/join', { turnstile }).catch(() => undefined);
+  async function forget() {
+    if (!confirm(t('privacy.forget.confirm'))) return;
+    try {
+      await api.post('/api/public/forget');
+    } catch (e) {
+      if (!(e instanceof ApiError && e.status === 401)) return toast.show(t(guestErrorKey(e)), 'danger');
+    }
     await refresh();
-    setVerifying(false);
-    setVerifyAttempted(true);
-  }, [siteKey, refresh]);
-
-  useEffect(() => {
-    if (!siteKey || autoVerified.current) return;
-    autoVerified.current = true;
-    void verify();
-  }, [siteKey, verify]);
+  }
 
   if (!data && !error) {
     return (
@@ -191,19 +164,21 @@ export function GuestApp() {
         <div className="bg-warning/15 px-4 py-2 text-center text-sm text-warning">{t('guest.error.network')}</div>
       ) : null}
       <main className="mx-auto max-w-lg px-4 pt-2">
-        {siteKey && verifyAttempted && !verifying ? (
-          <div className="mb-4 flex flex-col gap-2">
-            <Notice tone="warning">{t('guest.unverified')}</Notice>
-            <Button size="sm" variant="outline" onClick={() => void verify()}>
-              {t('guest.retry')}
-            </Button>
-          </div>
-        ) : null}
         {data && tab === 'vote' ? (
           <VoteTab state={data} offsetMs={offsetMs} refresh={refresh} toast={toast.show} />
         ) : null}
         {tab === 'wish' ? <WishTab toast={toast.show} /> : null}
-        <p className="mt-10 text-center text-xs leading-relaxed text-muted/80">{t('privacy.note')}</p>
+        <footer className="mt-10 flex flex-col items-center gap-3 text-center text-xs leading-relaxed text-muted/80">
+          <p>{t('privacy.note', privacyParams)}</p>
+          <LegalLinks />
+          <button
+            type="button"
+            onClick={() => void forget()}
+            className="text-muted underline underline-offset-2 hover:text-fg"
+          >
+            {t('privacy.forget')}
+          </button>
+        </footer>
       </main>
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-line/60 bg-bg/90 px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
         <div className="mx-auto grid max-w-lg grid-cols-2 gap-2">

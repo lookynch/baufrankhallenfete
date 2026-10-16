@@ -6,6 +6,7 @@ import { clearRateLimit, peekRateLimit } from '../../security/ratelimit.ts';
 import { audit, auditStatement } from '../../services/audit.ts';
 import { readBudget } from '../../services/budget.ts';
 import { claimPairing, DisplayError, displayKinds } from '../../services/displays.ts';
+import { getKv } from '../../services/kv.ts';
 import { setCoverage } from '../../services/library.ts';
 import {
   accountBalances,
@@ -18,6 +19,7 @@ import {
   reverseEntry,
 } from '../../services/ledger.ts';
 import { activeEntries, computeSchedule } from '../../services/playback.ts';
+import { purgeNow } from '../../services/retention.ts';
 import { expectedCloseAt, openRound } from '../../services/rounds.ts';
 import { loadSettings, saveSettings, SettingsError } from '../../services/settings.ts';
 import { authStatus } from '../../services/spotify-auth.ts';
@@ -28,6 +30,7 @@ import {
   createInvite,
   INVITE_TTL_MS,
   inviteTarget,
+  loginUserKey,
   requireOwner,
   requireReauth,
   revokeInvites,
@@ -82,8 +85,8 @@ systemRoutes.get('/dashboard', async (c) => {
     coverage: await setCoverage(db),
     stats: consumptionStats(rows, settings, now),
     settings: { voting: settings.voting, event: settings.event },
-    turnstileConfigured: Boolean(c.env.TURNSTILE_SITE_KEY && c.env.TURNSTILE_SECRET),
     accessConfigured: Boolean(c.env.ACCESS_AUD && c.env.ACCESS_TEAM_DOMAIN),
+    retentionRunAt: (await getKv(db, 'retention_run'))?.updatedAt ?? null,
   });
 });
 
@@ -314,18 +317,35 @@ systemRoutes.get('/audit', async (c) => {
 
 systemRoutes.get('/ratelimits', async (c) => {
   const now = c.var.rt.now();
-  const { results } = await c.env.DB.prepare(
-    "SELECT key, window_start, count FROM rate_limits WHERE window_start > ?1 AND key NOT LIKE 'stat:%' AND key NOT LIKE 'spotify:%' ORDER BY count DESC LIMIT 50",
-  )
+  const db = c.env.DB;
+  const { results } = await db
+    .prepare(
+      "SELECT key, window_start, count FROM rate_limits WHERE window_start > ?1 AND key NOT LIKE 'stat:%' AND key NOT LIKE 'spotify:%' ORDER BY count DESC LIMIT 50",
+    )
     .bind(now - 3_600_000)
-    .all();
-  return c.json({ limits: results });
+    .all<{ key: string; window_start: number; count: number }>();
+  const users = await db.prepare('SELECT username FROM admin_users').all<{ username: string }>();
+  const usernames = new Map(
+    await Promise.all(
+      users.results.map(async (u) => [await loginUserKey(c.env.IP_HASH_SECRET, u.username), u.username] as const),
+    ),
+  );
+  return c.json({
+    limits: results.map((l) => {
+      const [kind, subject = ''] = l.key.split(':');
+      return { ...l, label: kind === 'login' ? (usernames.get(subject) ?? null) : null };
+    }),
+  });
 });
 
 systemRoutes.post('/ratelimits/clear', async (c) => {
   const { key } = await body(c, z.object({ key: z.string().min(1).max(200) }));
   await clearRateLimit(c.env.DB, key);
-  await audit(c.env.DB, c.var.rt.now(), { userId: c.var.admin.userId, action: 'ratelimit_clear', entityId: key });
+  await audit(c.env.DB, c.var.rt.now(), {
+    userId: c.var.admin.userId,
+    action: 'ratelimit_clear',
+    entityId: key.split(':')[0],
+  });
   return c.json({ ok: true });
 });
 
@@ -465,21 +485,7 @@ ownerRoutes.post('/users/:id/revoke-sessions', async (c) => {
 ownerRoutes.post('/cleanup', async (c) => {
   requireReauth(c);
   const now = c.var.rt.now();
-  const db = c.env.DB;
-  const results = await db.batch([
-    db.prepare('DELETE FROM votes'),
-    db.prepare('DELETE FROM devices'),
-    db.prepare("UPDATE wishes SET device_id = 'anon'"),
-    db.prepare("UPDATE wish_upvotes SET device_id = 'anon-' || rowid"),
-    db.prepare('DELETE FROM rate_limits'),
-    db.prepare('UPDATE admin_sessions SET ip_hash = NULL'),
-    db.prepare('UPDATE audit_log SET ip_hash = NULL'),
-    db.prepare('DELETE FROM search_cache'),
-  ]);
-  await audit(db, now, {
-    userId: c.var.admin.userId,
-    action: 'event_data_cleanup',
-    after: { votes: results[0]?.meta.changes ?? 0, devices: results[1]?.meta.changes ?? 0 },
-  });
+  const counts = await purgeNow(c.env.DB, now);
+  await audit(c.env.DB, now, { userId: c.var.admin.userId, action: 'event_data_cleanup', after: counts });
   return c.json({ ok: true });
 });

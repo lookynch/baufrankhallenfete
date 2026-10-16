@@ -3,6 +3,7 @@ import { NavLink, Route, Routes } from 'react-router';
 import { Notice, Spinner, useToast } from '../../components/ui.tsx';
 import { api, ApiError } from '../../lib/api.ts';
 import { theme } from '../../lib/theme.ts';
+import { LegalLinks } from '../legal/LegalPages.tsx';
 import { LoginPage } from './AuthPages.tsx';
 import { Dashboard } from './Dashboard.tsx';
 import { LedgerPage } from './LedgerPage.tsx';
@@ -111,6 +112,9 @@ export function AdminApp() {
             >
               Abmelden
             </button>
+            <div className="mt-4">
+              <LegalLinks admin />
+            </div>
           </div>
         </aside>
         {menuOpen ? (

@@ -34,8 +34,8 @@ interface DashboardData {
   }>;
   stats: { totalCrates: number; totalCostCents: number; ratePerHour: number };
   settings: { voting: { enabled: boolean; startsAt: number }; event: { startsAt: number; endsAt: number } };
-  turnstileConfigured: boolean;
   accessConfigured: boolean;
+  retentionRunAt: number | null;
 }
 
 function ago(now: number, at: number | null | undefined): string {
@@ -67,9 +67,16 @@ export function Dashboard() {
       `Set „${c.name}“: nur ${c.nearbyMinutes} min passende Musik für ${c.durationMinutes} min – mehr Songs hinzufügen.`,
     );
   }
-  if ((data.budget?.fraction ?? 0) >= 0.6)
-    warnings.push('Request-Budget über 60 % – Polling wird automatisch gedrosselt.');
-  if (!data.turnstileConfigured) warnings.push('Turnstile nicht konfiguriert – Gäste werden nur per IP begrenzt.');
+  const budgetFraction = data.budget?.fraction ?? 0;
+  if (!data.budget || data.budget.error)
+    warnings.push(
+      'Budget-Wächter inaktiv – ohne Analytics-Daten (CF_ANALYTICS_TOKEN) werden Polling und Cover nicht gedrosselt.',
+    );
+  else if (budgetFraction >= 0.8)
+    warnings.push('Request-Budget über 80 % – Polling stark gedrosselt, Gäste sehen keine Cover.');
+  else if (budgetFraction >= 0.6) warnings.push('Request-Budget über 60 % – Polling wird automatisch gedrosselt.');
+  if (!data.retentionRunAt || now - data.retentionRunAt > 48 * 3_600_000)
+    warnings.push('Automatische Löschung lief seit über 48 h nicht – Workflow „Datenlöschung“ in GitHub prüfen.');
   const hints: string[] = [];
   if (!data.accessConfigured)
     hints.push('Cloudflare Access ist nicht eingerichtet – der Adminbereich ist nur durch Passwort und 2FA geschützt.');

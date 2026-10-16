@@ -4,6 +4,7 @@ import { wishKey } from './services/wishes.ts';
 
 export interface CandidateView {
   songId: number;
+  uri: string;
   title: string;
   artist: string;
   imageUrl: string | null;
@@ -33,7 +34,7 @@ export async function roundView(
   const schedule = options.schedule ?? computeSchedule(await activeEntries(db), now, options.snapshot ?? null);
   const { results } = await db
     .prepare(
-      `SELECT c.song_id, c.wish_id, s.title, s.artist, s.image_url, s.duration_ms, s.explicit, st.name AS set_name
+      `SELECT c.song_id, c.wish_id, s.spotify_uri, s.title, s.artist, s.image_url, s.duration_ms, s.explicit, st.name AS set_name
        FROM round_candidates c
        JOIN songs s ON s.id = c.song_id
        JOIN rounds r ON r.id = c.round_id
@@ -44,6 +45,7 @@ export async function roundView(
     .all<{
       song_id: number;
       wish_id: number | null;
+      spotify_uri: string;
       title: string;
       artist: string;
       image_url: string | null;
@@ -54,6 +56,7 @@ export async function roundView(
   const votes = options.includeTally ? new Map((await tally(db, round.id)).map((t) => [t.song_id, t.votes])) : null;
   const candidates = results.map((r): CandidateView => ({
     songId: r.song_id,
+    uri: r.spotify_uri,
     title: r.title,
     artist: r.artist,
     imageUrl: r.image_url,

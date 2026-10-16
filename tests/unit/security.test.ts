@@ -135,8 +135,10 @@ describe('Anwesenheits-Token und Gast-Cookie', () => {
   });
 
   it('lehnt abgelaufene oder fremd signierte Gast-Cookies ab', async () => {
-    const value = await encodeGuest('cookie', { deviceId: 'abc', verified: true, expiresAt: 2_000 });
-    expect(await decodeGuest('cookie', value, 1_000)).toEqual({ deviceId: 'abc', verified: true, expiresAt: 2_000 });
+    const value = await encodeGuest('cookie', { deviceId: 'abc', expiresAt: 2_000 });
+    expect(await decodeGuest('cookie', value, 1_000)).toEqual({ deviceId: 'abc', expiresAt: 2_000 });
+    const legacy = await signValue('cookie', 'guest', { d: 'abc', v: 0, e: 2_000 });
+    expect(await decodeGuest('cookie', legacy, 1_000)).toEqual({ deviceId: 'abc', expiresAt: 2_000 });
     expect(await decodeGuest('cookie', value, 3_000)).toBeNull();
     expect(await decodeGuest('falsch', value, 1_000)).toBeNull();
   });

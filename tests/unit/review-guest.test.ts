@@ -44,8 +44,6 @@ function vote(deviceId: string, ipKey: string, overrides: Partial<VoteInput> = {
     ipKey,
     netKey: ipKey,
     ipFamily: 'v6',
-    verified: true,
-    fpHash: null,
     now: 1,
     ...overrides,
   };
@@ -178,8 +176,13 @@ class Harness {
       { waitUntil: (p: Promise<unknown>) => this.pending.push(p), passThroughOnException: () => {}, props: {} },
     );
     while (this.pending.length) await this.pending.shift();
-    const setCookie = response.headers.getSetCookie()[0]?.split(';')[0] ?? cookie;
-    return { status: response.status, json: (await response.json()) as Record<string, unknown>, cookie: setCookie };
+    const setCookie = response.headers.getSetCookie()[0];
+    return {
+      status: response.status,
+      json: (await response.json()) as Record<string, unknown>,
+      cookie: setCookie?.split(';')[0] ?? cookie,
+      maxAge: Number(/Max-Age=(\d+)/i.exec(setCookie ?? '')?.[1]),
+    };
   }
 
   async join(ip: string) {
@@ -188,21 +191,45 @@ class Harness {
   }
 }
 
-describe('Gast-Beitritt ohne Turnstile', () => {
-  it('behandelt Gäste als verifiziert, wenn Turnstile nicht konfiguriert ist', async () => {
+describe('Gast-Beitritt', () => {
+  it('braucht nur den QR-Token und liefert keine Prüfstatus-Felder', async () => {
     const h = new Harness();
     const joined = await h.join('203.0.113.7');
-    expect(joined.json).toMatchObject({ joined: true, verified: true });
+    expect(joined.json).toEqual({ joined: true });
     const state = await h.request('203.0.113.7', joined.cookie, 'GET', '/api/public/state');
-    expect(state.json).toMatchObject({ verified: true, turnstileSiteKey: null });
+    expect(state.json.joined).toBe(true);
+    expect(state.json).not.toHaveProperty('verified');
+    expect(state.json).not.toHaveProperty('turnstileSiteKey');
   });
 
-  it('bleibt unverifiziert mit Turnstile ohne gültiges Token und liefert den Site-Key zum Nachholen', async () => {
-    const h = new Harness({ TURNSTILE_SITE_KEY: 'site', TURNSTILE_SECRET: 'secret' });
+  it('ignoriert Felder alter Clients und speichert keine Gerätesignatur', async () => {
+    const h = new Harness();
+    const token = await presenceToken('test-qr-secret-0123456789', h.clock.time);
+    const joined = await h.request('203.0.113.7', null, 'POST', '/api/public/join', {
+      token,
+      turnstile: 'alt',
+      fingerprint: 'ua|de|390x844',
+    });
+    expect(joined.json).toEqual({ joined: true });
+    expect(await h.env.DB.prepare('SELECT fp_hash FROM devices').first()).toEqual({ fp_hash: null });
+    expect((await h.request('203.0.113.7', null, 'GET', '/api/public/config')).status).toBe(404);
+  });
+
+  it('begrenzt das Cookie auf 24 h und verlängert es bei erneutem Beitritt nicht', async () => {
+    const h = new Harness();
+    await saveSettings(h.env.DB, 'event', { startsAt: T0, endsAt: T0 + 30 * 24 * 3_600_000 }, T0, null);
     const joined = await h.join('203.0.113.7');
-    expect(joined.json).toMatchObject({ joined: true, verified: false });
-    const state = await h.request('203.0.113.7', joined.cookie, 'GET', '/api/public/state');
-    expect(state.json).toMatchObject({ verified: false, turnstileSiteKey: 'site' });
+    expect(joined.maxAge).toBe(24 * 3600);
+    h.clock.advance(3_600_000);
+    const again = await h.request('203.0.113.7', joined.cookie, 'POST', '/api/public/join', {});
+    expect(again.json).toEqual({ joined: true });
+    expect(again.maxAge).toBe(23 * 3600);
+  });
+
+  it('hält mindestens 12 h, auch wenn die Fete bald endet', async () => {
+    const h = new Harness();
+    await saveSettings(h.env.DB, 'event', { startsAt: T0 - 3_600_000, endsAt: T0 + 3_600_000 }, T0, null);
+    expect((await h.join('203.0.113.7')).maxAge).toBe(12 * 3600);
   });
 });
 

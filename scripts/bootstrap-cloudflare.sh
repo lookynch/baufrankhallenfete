@@ -59,12 +59,13 @@ cat <<TXT
 Noch manuell (siehe README, Abschnitt "Einmalige Einrichtung"):
   1. Cloudflare API-Token erstellen: Rechte "Account / Cloudflare Pages / Edit" und "Account / D1 / Edit",
      nur dieses Konto, mit Ablaufdatum -> GitHub-Secret CLOUDFLARE_API_TOKEN (+ CLOUDFLARE_ACCOUNT_ID).
+     Deploy und der tägliche Workflow "Datenlöschung" nutzen diesen Token.
   2. Spotify-App anlegen (Redirect-URI https://$PROJECT.pages.dev/admin/spotify/callback)
      -> Secrets SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET.
-  3. Turnstile-Widget (Modus "Invisible") für $PROJECT.pages.dev -> TURNSTILE_SITE_KEY, TURNSTILE_SECRET
-     (ohne Turnstile gelten Gäste als verifiziert; das Dashboard warnt dann).
-  4. Cloudflare Access für /admin* und /api/admin* (auch *.$PROJECT.pages.dev) -> ACCESS_TEAM_DOMAIN, ACCESS_AUD.
-  5. Optional: Analytics-Token (Account Analytics: Read) -> CF_ANALYTICS_TOKEN.
-  6. Branch-Protection für main aktivieren (PR + Review + grüne CI).
-  7. wrangler.toml committen, nach main mergen -> Deploy läuft automatisch.
+  3. Cloudflare Access für /admin* und /api/admin* (auch *.$PROJECT.pages.dev) -> ACCESS_TEAM_DOMAIN, ACCESS_AUD.
+  4. Dringend empfohlen: Analytics-Token (Account Analytics: Read) -> CF_ANALYTICS_TOKEN
+     (ohne ihn arbeitet der Budget-Wächter nicht; das Dashboard warnt dann).
+  5. Branch-Protection für main aktivieren (PR + Review + grüne CI).
+  6. wrangler.toml committen, nach main mergen -> Deploy läuft automatisch.
+  7. Workflow "Datenlöschung" in GitHub Actions einmal manuell starten und prüfen, dass er grün ist.
 TXT

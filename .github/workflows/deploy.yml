@@ -57,8 +57,6 @@ jobs:
           ENC_KEY: ${{ secrets.ENC_KEY }}
           SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
           SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
-          TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}
-          TURNSTILE_SECRET: ${{ secrets.TURNSTILE_SECRET }}
           BOOTSTRAP_TOKEN: ${{ secrets.BOOTSTRAP_TOKEN }}
           ACCESS_TEAM_DOMAIN: ${{ secrets.ACCESS_TEAM_DOMAIN }}
           ACCESS_AUD: ${{ secrets.ACCESS_AUD }}
@@ -71,7 +69,7 @@ jobs:
           done
           file="$(mktemp)"
           trap 'rm -f "$file"' EXIT
-          jq -n 'env | with_entries(select(.key | IN("SESSION_PEPPER","COOKIE_SECRET","QR_SECRET","IP_HASH_SECRET","BUZZER_HMAC_SECRET","ENC_KEY","SPOTIFY_CLIENT_ID","SPOTIFY_CLIENT_SECRET","TURNSTILE_SITE_KEY","TURNSTILE_SECRET","BOOTSTRAP_TOKEN","ACCESS_TEAM_DOMAIN","ACCESS_AUD","CF_ANALYTICS_TOKEN","CF_ACCOUNT_ID","PBKDF2_ITERATIONS")) | select(.value != ""))' > "$file"
+          jq -n 'env | with_entries(select(.key | IN("SESSION_PEPPER","COOKIE_SECRET","QR_SECRET","IP_HASH_SECRET","BUZZER_HMAC_SECRET","ENC_KEY","SPOTIFY_CLIENT_ID","SPOTIFY_CLIENT_SECRET","BOOTSTRAP_TOKEN","ACCESS_TEAM_DOMAIN","ACCESS_AUD","CF_ANALYTICS_TOKEN","CF_ACCOUNT_ID","PBKDF2_ITERATIONS")) | select(.value != ""))' > "$file"
           npx wrangler pages secret bulk "$file" --project-name "$PAGES_PROJECT"
           present="$(npx wrangler pages secret list --project-name "$PAGES_PROJECT")"
           for optional in SPOTIFY_CLIENT_ID SPOTIFY_CLIENT_SECRET TURNSTILE_SITE_KEY TURNSTILE_SECRET BOOTSTRAP_TOKEN ACCESS_TEAM_DOMAIN ACCESS_AUD CF_ANALYTICS_TOKEN PBKDF2_ITERATIONS; do

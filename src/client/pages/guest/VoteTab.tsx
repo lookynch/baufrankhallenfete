@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Cover, MoodBadge } from '../../components/music.tsx';
+import { Cover, MoodBadge, SpotifyLink, SpotifyLogo } from '../../components/music.tsx';
 import { Notice } from '../../components/ui.tsx';
 import { api } from '../../lib/api.ts';
 import { useI18n } from '../../lib/i18n.tsx';
@@ -8,6 +8,7 @@ import { guestErrorKey } from './GuestApp.tsx';
 
 export interface Candidate {
   songId: number;
+  uri: string;
   title: string;
   artist: string;
   imageUrl: string | null;
@@ -21,12 +22,10 @@ export interface GuestState {
   now: number;
   eventName: string;
   pollAfterMs: number;
-  verified?: boolean;
-  turnstileSiteKey?: string | null;
   voting?: { active: boolean; startsAt: number; endsAt: number | null };
   round?: { id: number; seq: number; level: number; expectedCloseAt: number; candidates: Candidate[] } | null;
   myVote?: number | null;
-  nowPlaying?: { title: string; artist: string; imageUrl: string | null } | null;
+  nowPlaying?: { uri: string; title: string; artist: string; imageUrl: string | null } | null;
 }
 
 export function VoteTab({
@@ -84,11 +83,12 @@ export function VoteTab({
       {state.nowPlaying ? (
         <div className="flex items-center gap-3 rounded-2xl bg-surface/80 p-3 ring-1 ring-line">
           <Cover src={state.nowPlaying.imageUrl} size={44} />
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="text-xs font-semibold uppercase tracking-wider text-accent">{t('guest.nowPlaying')}</div>
-            <div className="truncate font-semibold">{state.nowPlaying.title}</div>
-            <div className="truncate text-sm text-muted">{state.nowPlaying.artist}</div>
+            <div className="font-semibold break-words">{state.nowPlaying.title}</div>
+            <div className="text-sm break-words text-muted">{state.nowPlaying.artist}</div>
           </div>
+          <SpotifyLink uri={state.nowPlaying.uri} />
         </div>
       ) : null}
 
@@ -126,41 +126,47 @@ export function VoteTab({
             {round.candidates.map((c) => {
               const selected = myVote === c.songId;
               return (
-                <li key={c.songId}>
+                <li
+                  key={c.songId}
+                  className={`flex flex-col gap-2 rounded-2xl bg-surface p-1.5 ring-1 transition ${selected ? 'ring-4 ring-primary glow' : 'ring-line'}`}
+                >
                   <button
                     type="button"
                     onClick={() => void vote(c.songId)}
                     disabled={pending !== null || remaining <= 0}
                     aria-pressed={selected}
-                    className={`group relative flex w-full flex-col overflow-hidden rounded-2xl bg-surface text-left ring-1 transition active:scale-[0.98] ${selected ? 'ring-4 ring-primary glow' : 'ring-line'}`}
+                    className="flex flex-col gap-2 text-left transition active:scale-[0.98]"
                   >
-                    <div className="relative aspect-square w-full">
-                      <Cover src={c.imageUrl} size={400} className="!h-full !w-full rounded-none" />
-                      {selected ? (
-                        <div className="absolute inset-0 grid place-items-center bg-primary/35">
-                          <span className="rounded-full bg-primary px-3 py-1 text-sm font-bold text-on-primary">
-                            ✓ {t('guest.vote.mine')}
-                          </span>
+                    <Cover src={c.imageUrl} size={400} className="aspect-square !h-auto !w-full" />
+                    <div className={`flex flex-col gap-1 px-1 ${pending === c.songId ? 'animate-pulse' : ''}`}>
+                      {selected || c.wishKey ? (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {selected ? (
+                            <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-bold text-on-primary">
+                              ✓ {t('guest.vote.mine')}
+                            </span>
+                          ) : null}
+                          {c.wishKey ? (
+                            <span className="rounded-md bg-raised px-1.5 py-0.5 font-mono text-[10px] font-bold text-accent">
+                              {c.wishKey}
+                            </span>
+                          ) : null}
                         </div>
                       ) : null}
-                      {pending === c.songId ? <div className="absolute inset-0 animate-pulse bg-bg/40" /> : null}
-                      {c.wishKey ? (
-                        <span className="absolute top-2 left-2 rounded-md bg-bg/80 px-1.5 py-0.5 font-mono text-[10px] font-bold text-accent">
-                          {c.wishKey}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="p-2.5">
-                      <div className="line-clamp-2 text-sm leading-tight font-semibold">{c.title}</div>
-                      <div className="mt-0.5 truncate text-xs text-muted">{c.artist}</div>
+                      <div className="text-sm leading-tight font-semibold break-words">{c.title}</div>
                     </div>
                   </button>
+                  <div className="flex items-center justify-between gap-3 pl-1">
+                    <div className="min-w-0 text-xs break-words text-muted">{c.artist}</div>
+                    <SpotifyLink uri={c.uri} />
+                  </div>
                 </li>
               );
             })}
           </ul>
         </>
       )}
+      {state.nowPlaying || round ? <SpotifyLogo className="self-center" /> : null}
     </div>
   );
 }

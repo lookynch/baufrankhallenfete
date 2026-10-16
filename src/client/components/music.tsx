@@ -1,20 +1,77 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
+import { coverPath, spotifyTrackUrl } from '../../shared/spotify.ts';
 import { useI18n, type MessageKey } from '../lib/i18n.tsx';
+import { spotifyIcon, spotifyLogo } from './spotify-brand.ts';
+
+function BrandMark({
+  mark,
+  size,
+  label,
+  className = '',
+}: {
+  mark: typeof spotifyLogo;
+  size: number;
+  label?: string;
+  className?: string;
+}) {
+  return (
+    <svg
+      viewBox={mark.viewBox}
+      fill="currentColor"
+      role={label ? 'img' : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+      className={`w-auto shrink-0 text-white ${className}`}
+      style={{ height: size }}
+    >
+      {mark.paths.map((d) => (
+        <path key={d} d={d} />
+      ))}
+    </svg>
+  );
+}
+
+export function SpotifyLogo({ size = 24, className = '' }: { size?: number; className?: string }) {
+  const { t } = useI18n();
+  return <BrandMark mark={spotifyLogo} size={size} label={t('spotify.attribution')} className={className} />;
+}
+
+export function SpotifyLink({ uri }: { uri: string }) {
+  const { t } = useI18n();
+  const href = spotifyTrackUrl(uri);
+  if (!href) return null;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={t('spotify.open')}
+      className="shrink-0 rounded-full p-1.5 transition hover:bg-raised"
+    >
+      <BrandMark mark={spotifyIcon} size={24} />
+    </a>
+  );
+}
 
 export function Cover({
   src,
   size = 64,
+  large,
   className = '',
 }: {
   src: string | null | undefined;
   size?: number;
+  large?: boolean;
   className?: string;
 }) {
-  if (!src) {
+  const path = coverPath(src);
+  const [failed, setFailed] = useState<string | null>(null);
+  const shape = `shrink-0 ${large ? 'rounded-lg' : 'rounded'} ${className}`;
+  if (!path || failed === path) {
     return (
       <div
-        className={`grid shrink-0 place-items-center rounded-xl bg-gradient-to-br from-primary/40 to-accent/40 text-xl ${className}`}
+        className={`grid place-items-center bg-gradient-to-br from-primary/40 to-accent/40 text-xl ${shape}`}
         style={{ width: size, height: size }}
       >
         ♪
@@ -23,11 +80,12 @@ export function Cover({
   }
   return (
     <img
-      src={src}
+      src={path}
       alt=""
       loading="lazy"
-      referrerPolicy="no-referrer"
-      className={`shrink-0 rounded-xl object-cover ${className}`}
+      decoding="async"
+      onError={() => setFailed(path)}
+      className={`object-cover ${shape}`}
       style={{ width: size, height: size }}
     />
   );

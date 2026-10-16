@@ -1,12 +1,14 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../src/server/app.ts';
 import type { Env } from '../../src/server/env.ts';
 import { buzzerSignature } from '../../src/server/routes/buzzer.ts';
 import { presenceToken } from '../../src/server/security/presence.ts';
 import { totpCode } from '../../src/server/security/totp.ts';
+import { setKv } from '../../src/server/services/kv.ts';
 import { saveSettings } from '../../src/server/services/settings.ts';
+import { tick } from '../../src/server/services/tick.ts';
 import { FakeSpotify, makeTrack } from '../helpers/fake-spotify.ts';
-import { Clock, testEnv } from '../helpers/runtime.ts';
+import { Clock, testEnv, testRuntime } from '../helpers/runtime.ts';
 
 const ORIGIN = 'https://fete.example';
 const T0 = Date.UTC(2026, 10, 20, 17, 0, 0);
@@ -103,8 +105,11 @@ describe('Grundlagen', () => {
     const h = new Harness();
     const res = await h.client().request('GET', '/api/health');
     expect(res.status).toBe(200);
-    expect(res.json.schemaVersion).toBe(2);
+    expect(res.json.schemaVersion).toBe(3);
     expect(res.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");
+    expect(res.headers.get('Content-Security-Policy')).not.toContain('challenges.cloudflare.com');
+    expect(res.headers.get('Content-Security-Policy')).toContain("img-src 'self' data:;");
+    expect(res.headers.get('Content-Security-Policy')).not.toContain('https:');
     expect(res.headers.get('Cache-Control')).toBe('no-store');
     const missing = await h.client().request('GET', '/api/nope');
     expect(missing.status).toBe(404);
@@ -206,6 +211,22 @@ describe('Admin-Authentifizierung', () => {
         })
       ).status,
     ).toBe(200);
+  });
+
+  it('begrenzt Login-Versuche pro IPv6-/48 auch bei wechselnden /64', async () => {
+    const statuses = [];
+    for (let i = 0; i < 61; i++) {
+      const res = await h.client(`2001:db8:77:${i.toString(16)}::1`).request('POST', '/api/admin/auth/login', {
+        json: { username: `user${i}`, password: 'falsch-falsch-falsch' },
+      });
+      statuses.push(res.status);
+    }
+    expect(statuses.slice(0, 60).every((s) => s === 401)).toBe(true);
+    expect(statuses[60]).toBe(429);
+    const otherNet = await h.client('2001:db8:78::1').request('POST', '/api/admin/auth/login', {
+      json: { username: 'user0', password: 'falsch-falsch-falsch' },
+    });
+    expect(otherNet.status).toBe(401);
   });
 
   it('beendet Sessions nach Inaktivität', async () => {
@@ -326,14 +347,14 @@ describe('Displays und Gäste', () => {
     expect((await guest.request('POST', '/api/public/join', { json: {} })).json.error).toBe('qr_expired');
     expect((await guest.request('POST', '/api/public/join', { json: { token: 'AAAAAAAA' } })).status).toBe(403);
     const token = await presenceToken('test-qr-secret-0123456789', h.clock.time);
-    const joined = await guest.request('POST', '/api/public/join', { json: { token, fingerprint: 'ua|de|390x844' } });
-    expect(joined.json).toMatchObject({ joined: true, verified: true });
+    const joined = await guest.request('POST', '/api/public/join', { json: { token } });
+    expect(joined.json).toEqual({ joined: true });
     expect(guest.cookies.has('__Host-fete')).toBe(true);
 
     h.clock.advance(5_000);
     await guest.request('GET', '/api/public/state');
     const state = await guest.request('GET', '/api/public/state');
-    expect(state.json).toMatchObject({ verified: true, turnstileSiteKey: null });
+    expect(state.json.joined).toBe(true);
     const round = state.json.round as { id: number; candidates: Array<{ songId: number; votes?: number }> };
     expect(round.candidates.length).toBeGreaterThanOrEqual(4);
     expect(round.candidates[0]).not.toHaveProperty('votes');
@@ -354,5 +375,190 @@ describe('Displays und Gäste', () => {
       headers: { Origin: 'https://evil.example' },
     });
     expect(csrf.status).toBe(403);
+  });
+});
+
+describe('Cover-Proxy', () => {
+  const id = 'ab67616d0000b2730123456789abcdef01234567';
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('lehnt ungültige IDs ohne Abruf bei Spotify ab', async () => {
+    const upstream = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', upstream);
+    const client = new Harness().client();
+    for (const path of ['/api/cover/xyz', `/api/cover/${id.toUpperCase()}`, `/api/cover/${id}0`]) {
+      const res = await client.request('GET', path);
+      expect(res.status).toBe(404);
+      expect(res.headers.get('Cache-Control')).toBe('no-store');
+      expect(res.headers.get('X-Frame-Options')).toBe('DENY');
+    }
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it('liefert Cover über den eigenen Server mit privatem Cache und Sicherheits-Headern', async () => {
+    const upstream = vi.fn<typeof fetch>(
+      async () => new Response(new Uint8Array([255, 216, 255]), { headers: { 'Content-Type': 'image/jpeg' } }),
+    );
+    vi.stubGlobal('fetch', upstream);
+    const client = new Harness().client();
+    client.cookies.set('__Host-fete', 'geheim');
+    const res = await client.request('GET', `/api/cover/${id}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('image/jpeg');
+    expect(res.headers.get('Cache-Control')).toBe('private, max-age=86400, immutable');
+    expect(res.headers.get('Cross-Origin-Resource-Policy')).toBe('same-origin');
+    expect(res.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");
+    expect(upstream).toHaveBeenCalledTimes(1);
+    const [url, init] = upstream.mock.calls[0]!;
+    expect(String(url)).toBe(`https://i.scdn.co/image/${id}`);
+    expect(init?.headers).toEqual({ Accept: 'image/*' });
+
+    upstream.mockResolvedValueOnce(new Response('down', { status: 503 }));
+    const failed = await client.request('GET', `/api/cover/${id}`);
+    expect(failed.status).toBe(502);
+    expect(failed.headers.get('Cache-Control')).toBe('no-store');
+  });
+});
+
+describe('Budget-Wächter für Gast-Cover', () => {
+  it('blendet Cover in Zustand, Wünschen und Suche ab 80 % aus, Spotify-Links bleiben', async () => {
+    const h = new Harness();
+    const db = h.env.DB;
+    const cover = (i: number) => `https://i.scdn.co/image/ab67616d0000b273${String(i).padStart(24, '0')}`;
+    await saveSettings(db, 'voting', { startsAt: T0 - 60_000 }, T0, null);
+    await db
+      .prepare("INSERT INTO sets (name, starts_at, ends_at, default_level, created_at) VALUES ('Alles', ?1, ?2, 2, 0)")
+      .bind(T0 - 3_600_000, T0 + 9 * 3_600_000)
+      .run();
+    for (let i = 0; i < 12; i++) {
+      const t = { ...makeTrack(i), imageUrl: cover(i) };
+      h.spotify.add(t);
+      await db
+        .prepare(
+          'INSERT INTO songs (spotify_uri, isrc, title, artist, image_url, duration_ms, title_norm, artist_norm, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?3, ?4, 0)',
+        )
+        .bind(t.uri, t.isrc, t.title, t.artist, t.imageUrl, t.durationMs)
+        .run();
+    }
+    await db.prepare('INSERT INTO set_songs (set_id, song_id, added_at) SELECT 1, id, 0 FROM songs').run();
+    const wish = { ...makeTrack(0, 200_000, 'wish'), imageUrl: cover(99) };
+    h.spotify.add(wish);
+    h.spotify.current = { uri: makeTrack(0).uri, startedAt: T0, pausedAt: null };
+
+    const guest = h.client('2a02:810d:aaaa:1::5');
+    const token = await presenceToken('test-qr-secret-0123456789', h.clock.time);
+    expect((await guest.request('POST', '/api/public/join', { json: { token } })).status).toBe(200);
+    expect((await guest.request('POST', '/api/public/wishes', { json: { uri: wish.uri } })).status).toBe(200);
+    h.clock.advance(5_000);
+    await tick(testRuntime(h.env, h.clock, h.spotify), { force: true });
+
+    async function guestCovers(fraction: number) {
+      await setKv(
+        db,
+        'request_budget',
+        { requestsToday: fraction * 100_000, fraction, fetchedAt: h.clock.time, error: null },
+        h.clock.time,
+      );
+      const state = await guest.request('GET', '/api/public/state');
+      const wishes = await guest.request('GET', '/api/public/wishes');
+      const search = await guest.request('GET', '/api/public/search?q=song');
+      return [
+        (state.json.nowPlaying as { imageUrl: string | null }).imageUrl,
+        ...(state.json.round as { candidates: Array<{ imageUrl: string | null }> }).candidates.map((c) => c.imageUrl),
+        ...(wishes.json.wishes as Array<{ image_url: string | null }>).map((w) => w.image_url),
+        ...(search.json.tracks as Array<{ imageUrl: string | null }>).map((t) => t.imageUrl),
+      ];
+    }
+
+    const normal = await guestCovers(0.79);
+    expect(normal.length).toBeGreaterThan(10);
+    expect(normal.every((url) => url?.startsWith('https://i.scdn.co/image/'))).toBe(true);
+    expect(normal).toContain(cover(99));
+    const throttled = await guestCovers(0.85);
+    expect(throttled).toHaveLength(normal.length);
+    expect(throttled.every((url) => url === null)).toBe(true);
+
+    const state = await guest.request('GET', '/api/public/state');
+    const wishes = await guest.request('GET', '/api/public/wishes');
+    const uris = [
+      (state.json.nowPlaying as { uri: string }).uri,
+      ...(state.json.round as { candidates: Array<{ uri: string }> }).candidates.map((c) => c.uri),
+      ...(wishes.json.wishes as Array<{ uri: string }>).map((w) => w.uri),
+    ];
+    expect(uris.length).toBeGreaterThan(10);
+    expect(uris.every((uri) => /^spotify:track:[A-Za-z0-9]+$/.test(uri))).toBe(true);
+    expect(uris).toContain(wish.uri);
+    expect(uris[0]).toBe(makeTrack(0).uri);
+  });
+});
+
+describe('Löschung', () => {
+  it('löscht auf Wunsch die Daten des eigenen Geräts samt Cookie', async () => {
+    const h = new Harness();
+    const token = await presenceToken('test-qr-secret-0123456789', h.clock.time);
+    const guest = h.client('2a02:810d:aaaa:1::5');
+    const other = h.client('2a02:810d:bbbb:1::5');
+    for (const client of [guest, other]) {
+      expect((await client.request('POST', '/api/public/join', { json: { token } })).status).toBe(200);
+    }
+    expect((await h.client().request('POST', '/api/public/forget')).status).toBe(401);
+    expect((await guest.request('POST', '/api/public/forget', { headers: { Origin: '' } })).status).toBe(403);
+
+    const forget = await guest.request('POST', '/api/public/forget');
+    expect(forget.status).toBe(200);
+    expect(forget.json).toEqual({ ok: true });
+    expect(forget.headers.get('Set-Cookie')).toMatch(/^__Host-fete=; Max-Age=0; Path=\/; Secure/);
+    expect(guest.cookies.has('__Host-fete')).toBe(false);
+    expect((await guest.request('GET', '/api/public/state')).json.joined).toBe(false);
+    expect((await h.env.DB.prepare('SELECT COUNT(*) AS n FROM devices').first<{ n: number }>())?.n).toBe(1);
+    expect((await other.request('GET', '/api/public/state')).json.joined).toBe(true);
+  });
+
+  it('nimmt das alte Cookie nach der Löschung nicht mehr an', async () => {
+    const h = new Harness();
+    const t = makeTrack(0);
+    await h.env.DB.batch([
+      h.env.DB.prepare(
+        'INSERT INTO songs (spotify_uri, isrc, title, artist, duration_ms, title_norm, artist_norm, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?3, ?4, 0)',
+      ).bind(t.uri, t.isrc, t.title, t.artist, t.durationMs),
+      h.env.DB.prepare("INSERT INTO wishes (song_id, device_id, status, created_at) VALUES (1, 'anon', 'approved', 0)"),
+    ]);
+    const guest = h.client('203.0.113.7');
+    const token = await presenceToken('test-qr-secret-0123456789', h.clock.time);
+    expect((await guest.request('POST', '/api/public/join', { json: { token } })).status).toBe(200);
+    const replay = h.client('203.0.113.7');
+    replay.cookies.set('__Host-fete', guest.cookies.get('__Host-fete')!);
+
+    expect((await guest.request('POST', '/api/public/wishes/1/upvote', { json: {} })).json).toEqual({ ok: true });
+    expect((await guest.request('POST', '/api/public/forget')).status).toBe(200);
+    expect((await replay.request('POST', '/api/public/wishes/1/upvote', { json: {} })).status).toBe(401);
+    expect((await replay.request('POST', '/api/public/join', { json: {} })).json.error).toBe('qr_expired');
+    expect((await replay.request('GET', '/api/public/state')).json.joined).toBe(false);
+    const upvotes = await h.env.DB.prepare('SELECT COUNT(*) AS n FROM wish_upvotes').first<{ n: number }>();
+    expect(upvotes?.n).toBe(0);
+    const device = await h.env.DB.prepare('SELECT COUNT(*) AS n FROM devices').first<{ n: number }>();
+    expect(device?.n).toBe(0);
+  });
+
+  it('löscht per Admin-Button alle Gästedaten, die eigene Session bleibt', async () => {
+    const h = new Harness();
+    const { client: owner } = await createOwner(h);
+    const token = await presenceToken('test-qr-secret-0123456789', h.clock.time);
+    await h.client('2a02:810d:aaaa:1::5').request('POST', '/api/public/join', { json: { token } });
+    expect((await owner.request('GET', '/api/admin/dashboard')).json.retentionRunAt).toBeNull();
+
+    expect((await owner.request('POST', '/api/admin/cleanup')).status).toBe(200);
+    const count = async (table: string) =>
+      (await h.env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{ n: number }>())?.n;
+    expect(await count('devices')).toBe(0);
+    expect(await count('rate_limits')).toBe(0);
+    expect((await owner.request('GET', '/api/admin/auth/me')).status).toBe(200);
+    const audit = await h.env.DB.prepare("SELECT after_json FROM audit_log WHERE action = 'event_data_cleanup'").first<{
+      after_json: string;
+    }>();
+    expect(JSON.parse(audit!.after_json)).toEqual({ votes: 0, devices: 1 });
+    expect((await owner.request('GET', '/api/admin/dashboard')).json.retentionRunAt).toBe(h.clock.time);
   });
 });

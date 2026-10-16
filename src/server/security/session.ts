@@ -1,8 +1,10 @@
+import { legal } from '../../shared/legal.ts';
 import { randomToken, sha256Hex } from './crypto.ts';
 
+const HOUR = 3_600_000;
 export const ADMIN_COOKIE = '__Host-admin';
-export const SESSION_IDLE_MS = 2 * 3_600_000;
-export const SESSION_ABSOLUTE_MS = 12 * 3_600_000;
+export const SESSION_IDLE_MS = legal.cookies.adminIdleHours * HOUR;
+export const SESSION_ABSOLUTE_MS = legal.cookies.adminHours * HOUR;
 export const REAUTH_WINDOW_MS = 15 * 60_000;
 const LAST_SEEN_RESOLUTION_MS = 5 * 60_000;
 
@@ -15,19 +17,14 @@ export interface AdminPrincipal {
   reauthAt: number;
 }
 
-export async function createSession(
-  db: D1Database,
-  userId: number,
-  now: number,
-  meta: { ipHash: string; userAgent: string },
-): Promise<string> {
+export async function createSession(db: D1Database, userId: number, now: number): Promise<string> {
   const token = randomToken(32);
   await db
     .prepare(
-      `INSERT INTO admin_sessions (token_hash, user_id, created_at, last_seen_at, expires_at, reauth_at, ip_hash, user_agent)
-       VALUES (?1, ?2, ?3, ?3, ?4, ?3, ?5, ?6)`,
+      `INSERT INTO admin_sessions (token_hash, user_id, created_at, last_seen_at, expires_at, reauth_at)
+       VALUES (?1, ?2, ?3, ?3, ?4, ?3)`,
     )
-    .bind(await sha256Hex(token), userId, now, now + SESSION_ABSOLUTE_MS, meta.ipHash, meta.userAgent.slice(0, 200))
+    .bind(await sha256Hex(token), userId, now, now + SESSION_ABSOLUTE_MS)
     .run();
   return token;
 }

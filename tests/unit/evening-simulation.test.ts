@@ -105,8 +105,6 @@ async function runEvening(scenario: Scenario) {
           deviceId: `device-${v}`,
           ipKey: `ip-${v}`,
           ipFamily: 'v6',
-          verified: true,
-          fpHash: null,
           now: clock.time,
         });
       }
@@ -116,7 +114,7 @@ async function runEvening(scenario: Scenario) {
   return { db, spotify, levelByUri };
 }
 
-describe('Abendsimulation', () => {
+describe('Abendsimulation', { timeout: 30_000 }, () => {
   it('spielt nach dem Vorprogramm nur Gewinner, ohne Stau, mit sanften Übergängen und ohne Wiederholung', async () => {
     const { db, spotify, levelByUri } = await runEvening({ hours: 6 });
 
