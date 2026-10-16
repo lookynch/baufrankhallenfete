@@ -39,7 +39,7 @@ export function WishesPage() {
     <div className="flex flex-col gap-6">
       <PageTitle
         title="Songwünsche"
-        subtitle="Wünsche, die zur Party passen, werden automatisch freigegeben und kommen ins laufende Set. Mit Veto fliegt ein Song raus und kann nicht erneut gewünscht werden. „In Prüfung“ füllt sich nur, wenn die automatische Freigabe aus ist oder kein Set existiert."
+        subtitle="Wünsche, die zur Party passen, werden automatisch freigegeben. Vor dem Voting laufen sie reihum direkt (Wunsch-Jukebox), danach kommen sie ins Voting. Mit Veto fliegt ein Song raus und kann nicht erneut gewünscht werden – ein bereits bei Spotify eingereihter Song lässt sich aber nicht mehr stoppen."
       />
       <div className="flex flex-wrap gap-2">
         {columns.map((c) => (

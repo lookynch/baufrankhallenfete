@@ -1,6 +1,7 @@
 import type { Settings } from '../../shared/settings.ts';
 import type { Runtime } from '../env.ts';
 import { pruneRateLimits } from '../security/ratelimit.ts';
+import { jukeboxOpen, markPlayedWishes, planJukeboxWish } from './jukebox.ts';
 import { getKv, setKv, tryLock } from './kv.ts';
 import {
   activeEntries,
@@ -44,10 +45,13 @@ export async function tick(rt: Runtime, options: { force?: boolean } = {}): Prom
   const settings = await loadSettings(db, now);
 
   const fresh = await refreshSnapshot(rt, now);
-  if (fresh?.snapshot) await reconcile(db, rt.spotify, fresh.snapshot, fresh.fetchedAt);
+  const votingSince = votingActive(settings, now) ? settings.voting.startsAt : null;
+  if (fresh?.snapshot) await reconcile(db, rt.spotify, fresh.snapshot, fresh.fetchedAt, votingSince);
   const snapshot = fresh ?? (await readSnapshot(db));
   await expireStale(db, now, snapshot);
+  await markPlayedWishes(db);
   await advanceRounds(rt, settings, now, snapshot);
+  if (jukeboxOpen(settings, snapshot, now, rt.lastfm !== null)) await planJukeboxWish(db, settings, now);
   await queueNext(db, rt.spotify, now);
 
   if (await tryLock(db, 'prune', now, 3_600_000)) await pruneRateLimits(db, now);

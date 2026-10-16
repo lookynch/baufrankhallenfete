@@ -30,6 +30,7 @@ interface Scenario {
   votesPerRound?: number;
   tvOffline?: boolean;
   guestWishEveryMinutes?: number;
+  preVotingWishes?: Record<string, number>;
 }
 
 async function runEvening(scenario: Scenario) {
@@ -88,6 +89,19 @@ async function runEvening(scenario: Scenario) {
   }
   await spotify.startContext('spotify:playlist:preshow123');
 
+  const jukeboxUris = new Map<string, string>();
+  for (const [device, count] of Object.entries(scenario.preVotingWishes ?? {})) {
+    for (let i = 0; i < count; i++) {
+      const track = { ...makeTrack(i, 200_000, `jb${device}`), artist: 'Pop Star', artists: ['Pop Star'] };
+      spotify.add(track);
+      levelByUri.set(track.uri, 3);
+      jukeboxUris.set(track.uri, `${device}${i + 1}`);
+      clock.advance(4_000);
+      const settings = await loadSettings(db, clock.time);
+      await createWish(db, { spotify, lastfm, settings }, device, track.uri, clock.time);
+    }
+  }
+
   const end = T0 + scenario.hours * HOUR;
   let lastVoteRound = 0;
   while (clock.time < end) {
@@ -134,7 +148,7 @@ async function runEvening(scenario: Scenario) {
     }
     clock.advance(scenario.tvOffline ? 20_000 : 5_000);
   }
-  return { db, spotify, levelByUri, blockedUris, wishUris };
+  return { db, spotify, levelByUri, blockedUris, wishUris, jukeboxUris };
 }
 
 describe('Abendsimulation', { timeout: 30_000 }, () => {
@@ -183,6 +197,28 @@ describe('Abendsimulation', { timeout: 30_000 }, () => {
     expect(results.filter((r) => wishUris.has(r.spotify_uri)).length).toBeGreaterThan(wishUris.size / 2);
     const levels = queued.map((e) => levelByUri.get(e.uri)!);
     for (let i = 1; i < levels.length; i++) expect(Math.abs(levels[i]! - levels[i - 1]!)).toBeLessThanOrEqual(2);
+  });
+
+  it('spielt Vorab-Wünsche reihum bis zum Voting und nimmt den Rest ins Voting', async () => {
+    const { db, spotify, jukeboxUris } = await runEvening({ hours: 3, preVotingWishes: { a: 10, b: 1, c: 2 } });
+    const votingStart = T0 + 30 * MINUTE;
+    const played = spotify.log.filter((e) => jukeboxUris.has(e.uri));
+    expect(played.map((e) => jukeboxUris.get(e.uri)).slice(0, 6)).toEqual(['a1', 'b1', 'c1', 'a2', 'c2', 'a3']);
+    expect(spotify.maxQueueLength).toBeLessThanOrEqual(1);
+    const late = await db
+      .prepare('SELECT COUNT(*) AS n FROM playback WHERE wish_id IS NOT NULL AND created_at >= ?1')
+      .bind(votingStart)
+      .first<{ n: number }>();
+    expect(late?.n).toBe(0);
+    const leftover = [...jukeboxUris.keys()].filter((uri) => !played.some((e) => e.uri === uri));
+    expect(leftover.length).toBeGreaterThan(0);
+    const { results } = await db
+      .prepare('SELECT DISTINCT s.spotify_uri FROM round_candidates c JOIN songs s ON s.id = c.song_id')
+      .all<{ spotify_uri: string }>();
+    expect(leftover.some((uri) => results.some((r) => r.spotify_uri === uri))).toBe(true);
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM observed_plays WHERE kind = 'emergency'").first()).toEqual({
+      n: 0,
+    });
   });
 
   it('läuft weiter, wenn nur der Agent alle 20 s tickt', async () => {

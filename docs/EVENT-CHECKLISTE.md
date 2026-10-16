@@ -60,7 +60,7 @@
 - [ ] Spotify-Gerät aktiv, Standby und Bildschirmschoner aus.
 - [ ] **Crossfade/Automix aus.**
 - [ ] **Party-Account nur auf dem Abspielgerät eingeloggt.** Sonst übernimmt Spotify Connect die Wiedergabe auf einem anderen Gerät.
-- [ ] Im Admin „Vorprogramm starten“ und „Wiederholung an“ gedrückt. Das Abspielgerät zeigt „Playlist“ als Wiederholung.
+- [ ] Im Admin „Vorprogramm starten“ und „Wiederholung an“ gedrückt. Das Abspielgerät zeigt „Playlist“ als Wiederholung. Ohne laufende Wiedergabe spielt die Wunsch-Jukebox keine Gästewünsche.
 - [ ] Dashboard ohne Warnungen:
   - Spotify OK
   - Buzzer-PC online

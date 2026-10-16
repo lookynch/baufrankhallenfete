@@ -30,11 +30,11 @@ const de = {
   'guest.nowPlaying': 'Läuft gerade',
   'guest.wish.title': 'Dein Songwunsch',
   'guest.wish.hint':
-    'Song suchen, antippen, fertig. Dein Wunsch kommt in eine der nächsten Abstimmungen. Was nicht zur Party passt (z. B. Metal oder Volksmusik), taucht in der Suche nicht auf.',
+    'Song suchen, antippen, fertig. Vor dem Voting laufen Wünsche reihum direkt – jeder ist abwechselnd dran. Danach kommen sie in die Abstimmung. Was nicht zur Party passt (z. B. Metal oder Volksmusik), taucht in der Suche nicht auf.',
   'guest.wish.search': 'Song oder Künstler suchen',
   'guest.wish.send': 'Wünschen',
   'guest.wish.sent': 'Wunsch {key} angelegt! Das Team prüft ihn noch.',
-  'guest.wish.sentApproved': 'Wunsch {key} ist drin und kommt in eine der nächsten Abstimmungen!',
+  'guest.wish.sentApproved': 'Wunsch {key} ist drin!',
   'guest.wish.hidden': '{count} Treffer ausgeblendet – passen nicht zur Party.',
   'guest.wish.merged': 'Gibt es schon – deine Stimme wurde dazugezählt ({key})',
   'guest.wish.mine': 'Meine Wünsche',
@@ -42,8 +42,8 @@ const de = {
   'guest.wish.upvote': '+1',
   'guest.wish.limited': 'Gerade sehr viele Suchen – bitte gleich nochmal.',
   'guest.wish.unavailable': 'Die Suche ist gerade nicht verfügbar. Sag dem Team Bescheid.',
-  'guest.wish.error.too_many_open_wishes':
-    'Du hast in der letzten Stunde schon 3 Wünsche abgegeben. Bitte später nochmal.',
+  'guest.wish.error.wish_conflict': 'Das hat gerade nicht geklappt. Bitte nochmal versuchen.',
+  'guest.wish.error.already_scheduled': 'Der Song läuft gleich sowieso.',
   'guest.wish.error.not_party_fit': 'Der Song passt leider nicht zur Party.',
   'guest.wish.error.vetoed': 'Dieser Song wurde vom Team aussortiert.',
   'guest.wish.error.explicit_not_allowed': 'Songs mit expliziten Texten sind heute nicht erlaubt.',
@@ -55,7 +55,8 @@ const de = {
   'status.open': 'In Prüfung',
   'status.approved': 'Freigegeben',
   'status.rejected': 'Abgelehnt',
-  'status.played': 'Im Voting',
+  'status.played': 'Gespielt',
+  'status.queued': 'Läuft gleich',
   'privacy.short':
     'Privat betrieben von {name}. Zum Mitmachen speichern wir ein Geräte-Cookie und einen pseudonymisierten Netz-Schlüssel aus deiner IP-Adresse. Daten deines Geräts löschen wir im täglichen Löschlauf, sobald deine letzte Aktivität {days} Tage zurückliegt.',
   'privacy.note':
@@ -142,11 +143,11 @@ const en: Record<keyof typeof de, string> = {
   'guest.nowPlaying': 'Now playing',
   'guest.wish.title': 'Your song request',
   'guest.wish.hint':
-    "Search, tap, done. Your request joins one of the next votes. Anything that doesn't fit the party (e.g. metal or folk music) won't show up in the search.",
+    "Search, tap, done. Before the vote starts, requests play in turns – everyone gets a go. After that they join the vote. Anything that doesn't fit the party (e.g. metal or folk music) won't show up in the search.",
   'guest.wish.search': 'Search song or artist',
   'guest.wish.send': 'Request',
   'guest.wish.sent': 'Request {key} created! The team still has to review it.',
-  'guest.wish.sentApproved': 'Request {key} is in and will join one of the next votes!',
+  'guest.wish.sentApproved': 'Request {key} is in!',
   'guest.wish.hidden': "{count} results hidden – they don't fit the party.",
   'guest.wish.merged': 'Already requested – your vote was added ({key})',
   'guest.wish.mine': 'My requests',
@@ -154,7 +155,8 @@ const en: Record<keyof typeof de, string> = {
   'guest.wish.upvote': '+1',
   'guest.wish.limited': 'Lots of searches right now – please try again shortly.',
   'guest.wish.unavailable': 'Search is unavailable right now. Please let the team know.',
-  'guest.wish.error.too_many_open_wishes': 'You already made 3 requests in the last hour. Please try again later.',
+  'guest.wish.error.wish_conflict': "That didn't work just now. Please try again.",
+  'guest.wish.error.already_scheduled': 'This song is coming up anyway.',
   'guest.wish.error.not_party_fit': "Sorry, this song doesn't fit the party.",
   'guest.wish.error.vetoed': 'The team has ruled this song out.',
   'guest.wish.error.explicit_not_allowed': 'Songs with explicit lyrics are not allowed tonight.',
@@ -166,7 +168,8 @@ const en: Record<keyof typeof de, string> = {
   'status.open': 'In review',
   'status.approved': 'Approved',
   'status.rejected': 'Rejected',
-  'status.played': 'In the vote',
+  'status.played': 'Played',
+  'status.queued': 'Up next',
   'privacy.short':
     'Run privately by {name}. To take part we store a device cookie and a pseudonymised network key derived from your IP address. We delete your device’s data in the daily deletion run once {days} days have passed since your last activity.',
   'privacy.note':

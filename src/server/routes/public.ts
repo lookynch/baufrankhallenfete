@@ -195,7 +195,7 @@ publicRoutes.post('/wishes', async (c) => {
   const now = c.var.rt.now();
   const guest = await requireGuest(c);
   const ip = await clientNetwork(c);
-  await limit(c, 'wish-device', 5, 600, guest.deviceId);
+  await limit(c, 'wish-device', 10, 600, guest.deviceId);
   await limit(c, 'wish-ip', 30, 600, ip.hash);
   const input = await body(c, z.object({ uri: z.string().regex(/^spotify:track:[A-Za-z0-9]{10,40}$/) }));
   const settings = await loadSettings(c.env.DB, now);

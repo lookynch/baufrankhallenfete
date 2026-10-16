@@ -82,7 +82,9 @@ export function Dashboard() {
     warnings.push('Spotify-Freigabe läuft in weniger als 30 Tagen ab – neu verbinden.');
   }
   if (!data.genreFilter)
-    warnings.push('Genre-Filter aus: LASTFM_API_KEY fehlt. Gäste können gerade jeden Song wünschen.');
+    warnings.push(
+      'Genre-Filter aus: LASTFM_API_KEY fehlt. Gäste können gerade jeden Song wünschen, und die Wunsch-Jukebox vor dem Voting ist aus.',
+    );
   if (!agentHealthy) warnings.push('Buzzer-PC meldet sich nicht (Heartbeat älter als 60 s).');
   if (!data.displays.some((d) => d.kind === 'tv' && d.last_seen_at && now - d.last_seen_at < 180_000))
     warnings.push('Kein TV-Display online.');

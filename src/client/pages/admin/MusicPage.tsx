@@ -75,7 +75,7 @@ export function MusicPage() {
     <div className="flex flex-col gap-6">
       <PageTitle
         title="Musik & Sets"
-        subtitle="Songs auswählen, Stimmungslevel pflegen und festlegen, was wann zur Wahl steht."
+        subtitle="Die Bibliothek ist der Grundstock: Sie füllt Abstimmungsrunden auf, wenn zu wenige Gästewünsche da sind. Einmal per Playlist-Import befüllen, Sets legen fest, was wann zur Wahl steht."
         actions={<SpotifyLogo />}
       />
       <div className="flex flex-wrap gap-2">
