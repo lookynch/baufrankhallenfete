@@ -3,6 +3,8 @@ import { getKv, setKv } from './kv.ts';
 import { validAccessToken } from './spotify-auth.ts';
 import {
   mapTrack,
+  spotifyErrorReason,
+  spotifyFailureKind,
   type PlaybackSnapshot,
   type PlayerInfo,
   type PlaylistSummary,
@@ -14,12 +16,25 @@ import {
 
 const API = 'https://api.spotify.com/v1';
 const BACKOFF_KEY = 'spotify_backoff_until';
+const LOG_INTERVAL_MS = 60_000;
 let backoffUntilMemo = 0;
+const lastLogged = new Map<string, number>();
 
 type Json = Record<string, unknown>;
 
 function failure<T>(kind: SpotifyFailure, status?: number, message?: string): SpotifyResult<T> {
   return { ok: false, kind, status, message };
+}
+
+export function pathTemplate(path: string): string {
+  return path.split('?')[0]!.replace(/\/[A-Za-z0-9]{16,}(?=\/|$)/g, '/:id');
+}
+
+function logFailure(method: string, path: string, status: number, kind: SpotifyFailure, body: string, time: number) {
+  const key = `${method} ${pathTemplate(path)} ${status}`;
+  if ((lastLogged.get(key) ?? 0) + LOG_INTERVAL_MS > time) return;
+  lastLogged.set(key, time);
+  console.warn(`spotify ${key} ${kind} reason=${spotifyErrorReason(body) ?? '-'}`);
 }
 
 export function createHttpSpotify(env: Env, now: () => number, fetcher: typeof fetch = fetch): SpotifyApi {
@@ -68,12 +83,9 @@ export function createHttpSpotify(env: Env, now: () => number, fetcher: typeof f
       }
     }
     const message = await response.text().catch(() => '');
-    if (response.status === 401) return failure('unauthorized', 401, message);
-    if (response.status === 404) {
-      return failure(/NO_ACTIVE_DEVICE|device/i.test(message) ? 'no_device' : 'not_found', 404, message);
-    }
-    if (response.status >= 500) return failure('unknown', response.status, message);
-    return failure('client_error', response.status, message.slice(0, 300));
+    const kind = spotifyFailureKind(response.status, message);
+    logFailure(method, path, response.status, kind, message, time);
+    return failure(kind, response.status, message.slice(0, 300));
   }
 
   function mapResult<T>(result: SpotifyResult<Json | null>, map: (json: Json | null) => T): SpotifyResult<T> {
@@ -153,15 +165,18 @@ export function createHttpSpotify(env: Env, now: () => number, fetcher: typeof f
     },
     async playlistPage(id, offset) {
       const params = new URLSearchParams({ limit: '50', offset: String(offset), market: 'from_token' });
-      return mapResult(await call('GET', `/playlists/${encodeURIComponent(id)}/items?${params}`), (json) => {
-        const items = Array.isArray(json?.items) ? (json.items as Json[]) : [];
-        const tracks = items
-          .map((i) => mapTrack((i.item ?? i.track) as Parameters<typeof mapTrack>[0]))
-          .filter((t): t is SpotifyTrack => t !== null);
-        const total = typeof json?.total === 'number' ? json.total : tracks.length;
-        const nextOffset = offset + items.length;
-        return { tracks, total, next: json?.next && nextOffset < total ? nextOffset : null };
-      });
+      const result = await call('GET', `/playlists/${encodeURIComponent(id)}/items?${params}`);
+      if (!result.ok) return result;
+      const json = result.value;
+      if (!Array.isArray(json?.items)) return failure('forbidden');
+      const items = json.items as Json[];
+      const tracks = items
+        .map((i) => mapTrack((i.item ?? i.track) as Parameters<typeof mapTrack>[0]))
+        .filter((t): t is SpotifyTrack => t !== null);
+      const total = typeof json.total === 'number' ? json.total : tracks.length;
+      const nextOffset = offset + items.length;
+      const next = json.next && items.length > 0 && nextOffset < total ? nextOffset : null;
+      return { ok: true, value: { tracks, total, next } };
     },
     async myPlaylists() {
       return mapResult(await call('GET', '/me/playlists?limit=50'), (json) =>
@@ -171,8 +186,16 @@ export function createHttpSpotify(env: Env, now: () => number, fetcher: typeof f
           name: String(p.name ?? ''),
           trackCount: Number(((p.items ?? p.tracks) as Json | undefined)?.total ?? 0),
           owner: String((p.owner as Json | undefined)?.display_name ?? ''),
+          ownerId: String((p.owner as Json | undefined)?.id ?? ''),
+          collaborative: p.collaborative === true,
         })),
       );
+    },
+    async me() {
+      return mapResult(await call('GET', '/me'), (json) => ({
+        id: String(json?.id ?? ''),
+        name: typeof json?.display_name === 'string' ? json.display_name : null,
+      }));
     },
   };
 }

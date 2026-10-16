@@ -29,10 +29,22 @@ export interface PlaylistSummary {
   name: string;
   trackCount: number;
   owner: string;
+  ownerId: string;
+  collaborative: boolean;
 }
 
 export type SpotifyFailure =
-  'not_connected' | 'no_device' | 'rate_limited' | 'unauthorized' | 'not_found' | 'client_error' | 'unknown';
+  | 'not_connected'
+  | 'no_device'
+  | 'rate_limited'
+  | 'unauthorized'
+  | 'premium_required'
+  | 'owner_premium_required'
+  | 'user_not_registered'
+  | 'forbidden'
+  | 'not_found'
+  | 'client_error'
+  | 'unknown';
 
 export type SpotifyResult<T> =
   { ok: true; value: T } | { ok: false; kind: SpotifyFailure; status?: number; message?: string };
@@ -52,6 +64,30 @@ export interface SpotifyApi {
     offset: number,
   ): Promise<SpotifyResult<{ tracks: SpotifyTrack[]; next: number | null; total: number }>>;
   myPlaylists(): Promise<SpotifyResult<PlaylistSummary[]>>;
+  me(): Promise<SpotifyResult<{ id: string; name: string | null }>>;
+}
+
+export function spotifyErrorReason(body: string): string | null {
+  try {
+    const reason = (JSON.parse(body) as { error?: { reason?: unknown } }).error?.reason;
+    return typeof reason === 'string' ? reason : null;
+  } catch {
+    return null;
+  }
+}
+
+export function spotifyFailureKind(status: number, body: string): SpotifyFailure {
+  if (status === 401) return 'unauthorized';
+  if (status === 403) {
+    if (spotifyErrorReason(body) === 'PREMIUM_REQUIRED') return 'premium_required';
+    if (/owner of the app/i.test(body)) return 'owner_premium_required';
+    if (/not be registered/i.test(body)) return 'user_not_registered';
+    return 'forbidden';
+  }
+  if (status === 404) return /NO_ACTIVE_DEVICE|device/i.test(body) ? 'no_device' : 'not_found';
+  if (status === 429) return 'rate_limited';
+  if (status >= 500) return 'unknown';
+  return 'client_error';
 }
 
 interface RawTrack {
@@ -87,7 +123,7 @@ export function mapTrack(raw: RawTrack | null | undefined): SpotifyTrack | null 
 
 export function parseSpotifyReference(input: string): { kind: 'track' | 'playlist'; id: string } | null {
   const trimmed = input.trim();
-  const uri = /^spotify:(track|playlist):([A-Za-z0-9]{10,40})$/.exec(trimmed);
+  const uri = /^spotify:(?:user:[^:]+:)?(track|playlist):([A-Za-z0-9]{10,40})$/.exec(trimmed);
   if (uri) return { kind: uri[1] as 'track' | 'playlist', id: uri[2]! };
   try {
     const url = new URL(trimmed);
@@ -102,6 +138,20 @@ export function parseSpotifyReference(input: string): { kind: 'track' | 'playlis
   }
 }
 
+export function unsupportedSpotifyReference(input: string): 'short_link_unsupported' | 'album_link_unsupported' | null {
+  const trimmed = input.trim();
+  if (trimmed.startsWith('spotify:album:')) return 'album_link_unsupported';
+  try {
+    const url = new URL(trimmed);
+    if (url.hostname === 'spotify.link' || url.hostname === 'spoti.fi') return 'short_link_unsupported';
+    if (url.hostname === 'open.spotify.com' && url.pathname.split('/').includes('album'))
+      return 'album_link_unsupported';
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 export const disconnectedSpotify: SpotifyApi = {
   currentlyPlaying: async () => ({ ok: false, kind: 'not_connected' }),
   addToQueue: async () => ({ ok: false, kind: 'not_connected' }),
@@ -114,4 +164,5 @@ export const disconnectedSpotify: SpotifyApi = {
   track: async () => ({ ok: false, kind: 'not_connected' }),
   playlistPage: async () => ({ ok: false, kind: 'not_connected' }),
   myPlaylists: async () => ({ ok: false, kind: 'not_connected' }),
+  me: async () => ({ ok: false, kind: 'not_connected' }),
 };

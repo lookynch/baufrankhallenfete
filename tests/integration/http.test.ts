@@ -494,6 +494,71 @@ describe('Budget-Wächter für Gast-Cover', () => {
   });
 });
 
+describe('Spotify-Fehler in der Musikverwaltung', () => {
+  const playlist = (id: string, ownerId: string, collaborative = false) => ({
+    uri: `spotify:playlist:${id}`,
+    id,
+    name: id,
+    trackCount: 3,
+    owner: ownerId,
+    ownerId,
+    collaborative,
+  });
+
+  it('nennt die konkrete Ursache bei Import und Suche', async () => {
+    const h = new Harness();
+    const { client } = await createOwner(h);
+    const importRef = (reference: string) =>
+      client.request('POST', '/api/admin/library/import', { json: { reference, setId: null } });
+
+    h.spotify.failWith('playlistPage', 'forbidden');
+    expect((await importRef('https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=x')).json).toEqual({
+      error: 'spotify_playlist_not_accessible',
+    });
+    h.spotify.failWith('track', 'owner_premium_required');
+    expect((await importRef('spotify:track:4uLU6hMCjMI75M1A2tKUQC')).json).toEqual({
+      error: 'spotify_owner_premium_required',
+    });
+    expect((await importRef('https://spotify.link/abcdef')).json).toEqual({ error: 'short_link_unsupported' });
+
+    h.spotify.failWith('search', 'user_not_registered');
+    const search = await client.request('GET', '/api/admin/spotify/search?q=song');
+    expect(search).toMatchObject({ status: 502, json: { error: 'spotify_user_not_registered' } });
+  });
+
+  it('markiert fremde Playlists als nicht importierbar', async () => {
+    const h = new Harness();
+    const { client } = await createOwner(h);
+    h.spotify.playlists = [playlist('eigene', 'party'), playlist('fremde', 'jemand'), playlist('gemeinsam', 'x', true)];
+    const res = await client.request('GET', '/api/admin/spotify/playlists');
+    const flags = (res.json.playlists as Array<{ id: string; accessible: boolean | null }>).map((p) => [
+      p.id,
+      p.accessible,
+    ]);
+    expect(flags).toEqual([
+      ['eigene', true],
+      ['fremde', false],
+      ['gemeinsam', true],
+    ]);
+
+    h.spotify.failWith('me', 'unknown');
+    const unknown = await client.request('GET', '/api/admin/spotify/playlists');
+    expect((unknown.json.playlists as Array<{ accessible: boolean | null }>).every((p) => p.accessible === null)).toBe(
+      true,
+    );
+  });
+
+  it('meldet Gästen eine ausgefallene Suche nicht als Rate-Limit', async () => {
+    const h = new Harness();
+    const token = await presenceToken('test-qr-secret-0123456789', h.clock.time);
+    const guest = h.client('2a02:810d:aaaa:1::7');
+    await guest.request('POST', '/api/public/join', { json: { token } });
+    h.spotify.failWith('search', 'owner_premium_required');
+    const res = await guest.request('GET', '/api/public/search?q=partysong');
+    expect(res.json).toMatchObject({ limited: false, unavailable: true, tracks: [] });
+  });
+});
+
 describe('Löschung', () => {
   it('löscht auf Wunsch die Daten des eigenen Geräts samt Cookie', async () => {
     const h = new Harness();

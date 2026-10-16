@@ -57,6 +57,9 @@ const messages: Record<string, string> = {
   cannot_disable_self: 'Du kannst dich nicht selbst deaktivieren.',
   entry_not_cancellable: 'Nur geplante Songs können entfernt werden.',
   invalid_spotify_reference: 'Kein gültiger Spotify-Link.',
+  short_link_unsupported:
+    'Kurzlinks (spotify.link) gehen nicht. In Spotify über „Teilen → Link kopieren“ den open.spotify.com-Link holen.',
+  album_link_unsupported: 'Alben lassen sich nicht importieren – einzelne Songs oder eine Playlist verwenden.',
   already_bootstrapped: 'Es gibt bereits einen Owner.',
   invalid_bootstrap_token: 'Bootstrap-Token falsch.',
   passkey_failed: 'Passkey konnte nicht bestätigt werden.',
@@ -67,14 +70,38 @@ const messages: Record<string, string> = {
   no_passkey: 'Für dieses Konto ist kein Passkey eingerichtet.',
 };
 
+const spotifyMessages: Record<string, string> = {
+  not_connected: 'Spotify ist nicht verbunden.',
+  no_device: 'Kein aktives Spotify-Abspielgerät.',
+  rate_limited: 'Spotify: zu viele Anfragen, bitte kurz warten.',
+  unauthorized: 'Spotify-Freigabe ungültig – unter Musik → Spotify neu verbinden.',
+  premium_required: 'Das verbundene Spotify-Konto hat kein Premium – zum Abspielen ist Premium nötig.',
+  owner_premium_required:
+    'Spotify sperrt die App: Der Inhaber der Spotify-Developer-App braucht ein aktives Premium-Abo.',
+  user_not_registered:
+    'Spotify sperrt das Konto: Im Spotify-Developer-Dashboard unter „User Management“ das verbundene Spotify-Konto eintragen.',
+  forbidden: 'Spotify verweigert den Zugriff.',
+  not_found: 'Bei Spotify nicht gefunden.',
+  playlist_not_accessible:
+    'Spotify gibt nur eigene oder kollaborative Playlists frei. Playlist in Spotify kopieren („Zu anderer Playlist hinzufügen“ → neue Playlist) und die Kopie importieren.',
+  client_error: 'Spotify hat die Anfrage abgelehnt.',
+  unknown: 'Spotify ist gerade nicht erreichbar.',
+};
+
+export function spotifyMessage(kind: string | undefined): string {
+  return (kind && spotifyMessages[kind]) ?? `Spotify-Fehler (${kind ?? 'unbekannt'}).`;
+}
+
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (messages[error.code]) return messages[error.code]!;
+    if (error.code.startsWith('spotify_')) return spotifyMessage(error.code.slice('spotify_'.length));
     if (error.code.startsWith('set_overlaps:')) return `Überschneidet sich mit Set „${error.code.slice(13)}“.`;
     if (error.code === 'invalid_input') {
       const issues = (error.details.issues as Array<{ path: string; message: string }> | undefined) ?? [];
       return `Ungültige Eingabe: ${issues.map((i) => i.path || i.message).join(', ')}`;
     }
+    if (error.status >= 500) return `Serverfehler (${error.code}) – bitte erneut versuchen.`;
     return `Fehler: ${error.code}`;
   }
   return 'Unbekannter Fehler.';

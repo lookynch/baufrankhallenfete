@@ -1,4 +1,10 @@
-import type { SpotifyApi, SpotifyResult, SpotifyTrack } from '../../src/server/services/spotify-api.ts';
+import type {
+  PlaylistSummary,
+  SpotifyApi,
+  SpotifyFailure,
+  SpotifyResult,
+  SpotifyTrack,
+} from '../../src/server/services/spotify-api.ts';
 
 export interface PlayLogEntry {
   uri: string;
@@ -16,6 +22,18 @@ export class FakeSpotify implements SpotifyApi {
   failQueue: SpotifyResult<null> | null = null;
   maxQueueLength = 0;
   offline = false;
+  playlists: PlaylistSummary[] = [];
+  account: { id: string; name: string | null } = { id: 'party', name: 'Party' };
+  readonly failures = new Map<keyof SpotifyApi, SpotifyFailure>();
+
+  failWith(method: keyof SpotifyApi, kind: SpotifyFailure): void {
+    this.failures.set(method, kind);
+  }
+
+  private failure(method: keyof SpotifyApi): { ok: false; kind: SpotifyFailure } | null {
+    const kind = this.failures.get(method);
+    return kind ? { ok: false, kind } : null;
+  }
 
   constructor(private readonly clock: () => number) {}
 
@@ -109,7 +127,9 @@ export class FakeSpotify implements SpotifyApi {
       .filter((e) => e.playedAt <= this.clock());
     return { ok: true as const, value: finished.slice(-50).reverse() };
   }
-  async search(query: string) {
+  async search(query: string): Promise<SpotifyResult<SpotifyTrack[]>> {
+    const failed = this.failure('search');
+    if (failed) return failed;
     const q = query.toLowerCase();
     return {
       ok: true as const,
@@ -117,14 +137,21 @@ export class FakeSpotify implements SpotifyApi {
     };
   }
   async track(id: string): Promise<SpotifyResult<SpotifyTrack>> {
+    const failed = this.failure('track');
+    if (failed) return failed;
     const track = this.catalog.get(`spotify:track:${id}`);
     return track ? { ok: true, value: track } : { ok: false, kind: 'not_found' };
   }
-  async playlistPage() {
-    return { ok: true as const, value: { tracks: [...this.catalog.values()].slice(0, 50), next: null, total: 50 } };
+  async playlistPage(): Promise<SpotifyResult<{ tracks: SpotifyTrack[]; next: number | null; total: number }>> {
+    const failed = this.failure('playlistPage');
+    if (failed) return failed;
+    return { ok: true, value: { tracks: [...this.catalog.values()].slice(0, 50), next: null, total: 50 } };
   }
-  async myPlaylists() {
-    return { ok: true as const, value: [] };
+  async myPlaylists(): Promise<SpotifyResult<PlaylistSummary[]>> {
+    return this.failure('myPlaylists') ?? { ok: true, value: this.playlists };
+  }
+  async me(): Promise<SpotifyResult<{ id: string; name: string | null }>> {
+    return this.failure('me') ?? { ok: true, value: this.account };
   }
 }
 

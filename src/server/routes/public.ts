@@ -169,6 +169,7 @@ publicRoutes.get('/search', async (c) => {
   const covers = await coversAllowed(c);
   return c.json({
     limited: result.limited,
+    unavailable: result.unavailable,
     tracks: result.tracks.map((t) => ({
       uri: t.uri,
       title: t.title,

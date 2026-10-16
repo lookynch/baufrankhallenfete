@@ -10,8 +10,21 @@ import { importTracks, LibraryError, listSets, saveSet, setCoverage, type SongRo
 import { activeEntries, computeSchedule } from '../../services/playback.ts';
 import { finalizeRound, minCloseAt, openRound, tally, votingActive } from '../../services/rounds.ts';
 import { loadSettings } from '../../services/settings.ts';
-import { authorizeUrl, authStatus, clearTokens, exchangeCode, spotifyConfigured } from '../../services/spotify-auth.ts';
-import { parseSpotifyReference, type SpotifyTrack } from '../../services/spotify-api.ts';
+import {
+  authorizeUrl,
+  authStatus,
+  clearTokens,
+  exchangeCode,
+  loadTokens,
+  rememberAccountId,
+  spotifyConfigured,
+} from '../../services/spotify-auth.ts';
+import {
+  parseSpotifyReference,
+  unsupportedSpotifyReference,
+  type SpotifyFailure,
+  type SpotifyTrack,
+} from '../../services/spotify-api.ts';
 import { readSnapshot, tick } from '../../services/tick.ts';
 import { decideWish, wishKey, WishError } from '../../services/wishes.ts';
 import { roundView, upNextView } from '../../views.ts';
@@ -22,6 +35,13 @@ const OAUTH_COOKIE = '__Host-oauth';
 
 function redirectUri(c: AppContext): string {
   return `${new URL(c.req.url).origin}/admin/spotify/callback`;
+}
+
+function spotifyFailure(status: 422 | 502, kind: SpotifyFailure, source: 'playlist' | 'other' = 'other'): never {
+  if (source === 'playlist' && (kind === 'forbidden' || kind === 'not_found')) {
+    fail(422, 'spotify_playlist_not_accessible');
+  }
+  fail(status, `spotify_${kind}`);
 }
 
 function libraryFailure(error: unknown): never {
@@ -58,14 +78,14 @@ musicRoutes.post('/spotify/callback', async (c) => {
   );
   deleteCookie(c, OAUTH_COOKIE, { path: '/', secure: true });
   if (!stored || stored.s !== input.state || stored.u !== c.var.admin.userId) fail(403, 'oauth_state_mismatch');
-  const tokens = await exchangeCode(c.env, input.code, redirectUri(c), now);
-  if (!tokens) fail(502, 'spotify_exchange_failed');
+  const exchange = await exchangeCode(c.env, input.code, redirectUri(c), now);
+  if (!exchange.ok) fail(502, `spotify_${exchange.kind}`);
   await audit(c.env.DB, now, {
     userId: c.var.admin.userId,
     action: 'spotify_connected',
-    after: { account: tokens.accountName },
+    after: { account: exchange.tokens.accountName },
   });
-  return c.json({ ok: true, accountName: tokens.accountName });
+  return c.json({ ok: true, accountName: exchange.tokens.accountName });
 });
 
 musicRoutes.post('/spotify/disconnect', async (c) => {
@@ -96,16 +116,31 @@ musicRoutes.post('/spotify/:action{skip|repeat|preshow}', async (c) => {
   return c.json(result.ok ? { ok: true } : { ok: false, error: result.kind });
 });
 
+async function spotifyAccountId(c: AppContext): Promise<string | null> {
+  const stored = (await loadTokens(c.env))?.accountId;
+  if (stored) return stored;
+  const me = await c.var.rt.spotify.me();
+  if (!me.ok || !me.value.id) return null;
+  await rememberAccountId(c.env, me.value.id, c.var.rt.now());
+  return me.value.id;
+}
+
 musicRoutes.get('/spotify/playlists', async (c) => {
   const result = await c.var.rt.spotify.myPlaylists();
-  if (!result.ok) fail(502, result.kind);
-  return c.json({ playlists: result.value });
+  if (!result.ok) spotifyFailure(502, result.kind);
+  const accountId = await spotifyAccountId(c);
+  return c.json({
+    playlists: result.value.map((p) => ({
+      ...p,
+      accessible: accountId === null ? null : p.collaborative || p.ownerId === accountId,
+    })),
+  });
 });
 
 musicRoutes.get('/spotify/search', async (c) => {
   const { q } = query(c, z.object({ q: z.string().min(2).max(100) }));
   const result = await c.var.rt.spotify.search(q);
-  if (!result.ok) fail(502, result.kind);
+  if (!result.ok) spotifyFailure(502, result.kind);
   const uris = result.value.map((t) => t.uri);
   const known = uris.length
     ? await c.env.DB.prepare(
@@ -129,18 +164,18 @@ musicRoutes.post('/library/import', async (c) => {
     }),
   );
   const ref = parseSpotifyReference(input.reference);
-  if (!ref) fail(422, 'invalid_spotify_reference');
+  if (!ref) fail(422, unsupportedSpotifyReference(input.reference) ?? 'invalid_spotify_reference');
   const spotify = c.var.rt.spotify;
   let tracks: SpotifyTrack[];
   let next: number | null = null;
   let total = 1;
   if (ref.kind === 'track') {
     const result = await spotify.track(ref.id);
-    if (!result.ok) fail(422, `spotify_${result.kind}`);
+    if (!result.ok) spotifyFailure(422, result.kind);
     tracks = [result.value];
   } else {
     const result = await spotify.playlistPage(ref.id, input.offset);
-    if (!result.ok) fail(422, `spotify_${result.kind}`);
+    if (!result.ok) spotifyFailure(422, result.kind, 'playlist');
     tracks = result.value.tracks;
     next = result.value.next;
     total = result.value.total;
@@ -563,7 +598,7 @@ musicRoutes.get('/spotify/preshow-check', async (c) => {
   const tracks: SpotifyTrack[] = [];
   for (let offset = 0, page = 0; page < 4; page++) {
     const result = await c.var.rt.spotify.playlistPage(id, offset);
-    if (!result.ok) fail(422, `spotify_${result.kind}`);
+    if (!result.ok) spotifyFailure(422, result.kind, 'playlist');
     tracks.push(...result.value.tracks);
     if (result.value.next === null) break;
     offset = result.value.next;

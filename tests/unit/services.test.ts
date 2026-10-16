@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { guestCoversAllowed, readBudget, refreshBudget, throttleFactor } from '../../src/server/services/budget.ts';
 import { importTracks, saveSet, setCoverage } from '../../src/server/services/library.ts';
 import {
@@ -8,7 +8,12 @@ import {
   storeTokens,
   validAccessToken,
 } from '../../src/server/services/spotify-auth.ts';
-import { createHttpSpotify } from '../../src/server/services/spotify-http.ts';
+import {
+  parseSpotifyReference,
+  spotifyFailureKind,
+  unsupportedSpotifyReference,
+} from '../../src/server/services/spotify-api.ts';
+import { createHttpSpotify, pathTemplate } from '../../src/server/services/spotify-http.ts';
 import { createWish, decideWish, guestWishes, searchTracks, upvoteWish } from '../../src/server/services/wishes.ts';
 import { claimPairing, pollPairing, startPairing, authenticateDisplay } from '../../src/server/services/displays.ts';
 import { FakeSpotify, makeTrack } from '../helpers/fake-spotify.ts';
@@ -56,8 +61,8 @@ describe('Spotify-Anbindung', () => {
       }
       return Response.json({ display_name: 'Party-Account' });
     });
-    const tokens = await exchangeCode(env, 'code', 'https://x/cb', NOW, fetcher);
-    expect(tokens?.accountName).toBe('Party-Account');
+    const exchange = await exchangeCode(env, 'code', 'https://x/cb', NOW, fetcher);
+    expect(exchange.ok && exchange.tokens.accountName).toBe('Party-Account');
     expect((await authStatus(env)).connected).toBe(true);
     expect(await validAccessToken(env, NOW + 1000, fetcher)).toBe('a1');
     expect(await validAccessToken(env, NOW + 3_590_000, fetcher)).toBe('a2');
@@ -115,6 +120,122 @@ describe('Spotify-Anbindung', () => {
     expect(calls.length).toBe(before);
     clock.advance(25_000);
     expect((await spotify.currentlyPlaying()).ok).toBe(true);
+  });
+
+  it('erkennt die Spotify-Sperren seit 2026 an Reason und Meldung', () => {
+    const body = (message: string, reason?: string) => JSON.stringify({ error: { status: 403, message, reason } });
+    expect(spotifyFailureKind(403, body('Active premium subscription required for the owner of the app.'))).toBe(
+      'owner_premium_required',
+    );
+    expect(spotifyFailureKind(403, body('Player command failed: Premium required', 'PREMIUM_REQUIRED'))).toBe(
+      'premium_required',
+    );
+    expect(
+      spotifyFailureKind(403, body('Check settings on developer dashboard, the user may not be registered.')),
+    ).toBe('user_not_registered');
+    expect(spotifyFailureKind(403, '')).toBe('forbidden');
+    expect(spotifyFailureKind(403, 'Forbidden')).toBe('forbidden');
+    expect(spotifyFailureKind(400, body('Invalid limit'))).toBe('client_error');
+    expect(spotifyFailureKind(401, '')).toBe('unauthorized');
+    expect(spotifyFailureKind(404, '{"error":{"reason":"NO_ACTIVE_DEVICE"}}')).toBe('no_device');
+    expect(spotifyFailureKind(503, '')).toBe('unknown');
+  });
+
+  it('loggt Spotify-Fehler ohne IDs, Query und Meldungstext, höchstens einmal pro Minute', async () => {
+    const env = testEnv();
+    const later = NOW + 1_000_000;
+    await storeTokens(
+      env,
+      { accessToken: 'tok', refreshToken: 'r', expiresAt: later + 3_600_000, authorizedAt: later, accountName: null },
+      later,
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { fetcher } = fakeFetch(
+      () =>
+        new Response(
+          JSON.stringify({ error: { message: 'Active premium subscription required for the owner of the app.' } }),
+          {
+            status: 403,
+          },
+        ),
+    );
+    const clock = new Clock(later);
+    const spotify = createHttpSpotify(env, clock.now, fetcher);
+    expect(await spotify.search('geheimer suchbegriff')).toMatchObject({ ok: false, kind: 'owner_premium_required' });
+    await spotify.search('noch einer');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toBe('spotify GET /search 403 owner_premium_required reason=-');
+    clock.advance(61_000);
+    await spotify.track('4uLU6hMCjMI75M1A2tKUQC');
+    expect(String(warn.mock.calls.at(-1)![0])).toContain('GET /tracks/:id 403');
+    warn.mockRestore();
+    expect(pathTemplate('/playlists/37i9dQZF1DXcBWIGoYBM5M/items?limit=50')).toBe('/playlists/:id/items');
+  });
+
+  it('meldet fremde Playlists als gesperrt und beendet leere Seiten', async () => {
+    const env = testEnv();
+    const later = NOW + 2_000_000;
+    await storeTokens(
+      env,
+      { accessToken: 'tok', refreshToken: 'r', expiresAt: later + 3_600_000, authorizedAt: later, accountName: null },
+      later,
+    );
+    let response: unknown = { name: 'Fremd', total: 30 };
+    const { fetcher } = fakeFetch(() => Response.json(response));
+    const spotify = createHttpSpotify(env, () => later, fetcher);
+    expect(await spotify.playlistPage('pl', 0)).toMatchObject({ ok: false, kind: 'forbidden' });
+    response = { items: [], total: 30, next: 'https://api.spotify.com/v1/playlists/pl/items?offset=50' };
+    expect(await spotify.playlistPage('pl', 50)).toMatchObject({ ok: true, value: { tracks: [], next: null } });
+  });
+
+  it('übersteht Netzfehler beim Token-Refresh ohne Ausnahme', async () => {
+    const env = testEnv({ SPOTIFY_CLIENT_ID: 'id', SPOTIFY_CLIENT_SECRET: 'secret' });
+    const later = NOW + 3_000_000;
+    await storeTokens(
+      env,
+      { accessToken: 'old', refreshToken: 'r', expiresAt: later - 1, authorizedAt: later, accountName: null },
+      later,
+    );
+    const failing = (async () => {
+      throw new TypeError('network');
+    }) as typeof fetch;
+    expect(await validAccessToken(env, later, failing)).toBeNull();
+    expect(await createHttpSpotify(env, () => later, failing).search('song')).toMatchObject({
+      ok: false,
+      kind: 'not_connected',
+    });
+  });
+
+  it('speichert keine Verbindung, wenn Spotify das Konto sperrt', async () => {
+    const env = testEnv({ SPOTIFY_CLIENT_ID: 'id', SPOTIFY_CLIENT_SECRET: 'secret' });
+    const { fetcher } = fakeFetch((url) => {
+      if (url.endsWith('/api/token'))
+        return Response.json({ access_token: 'a1', refresh_token: 'r1', expires_in: 3600 });
+      return new Response(
+        JSON.stringify({
+          error: { message: 'Check settings on developer dashboard, the user may not be registered.' },
+        }),
+        { status: 403 },
+      );
+    });
+    expect(await exchangeCode(env, 'code', 'https://x/cb', NOW, fetcher)).toEqual({
+      ok: false,
+      kind: 'user_not_registered',
+    });
+    expect(await loadTokens(env)).toBeNull();
+  });
+
+  it('erkennt Alt-URIs und erklärt nicht unterstützte Links', () => {
+    expect(parseSpotifyReference('spotify:user:party:playlist:37i9dQZF1DXcBWIGoYBM5M')).toEqual({
+      kind: 'playlist',
+      id: '37i9dQZF1DXcBWIGoYBM5M',
+    });
+    expect(unsupportedSpotifyReference('https://spotify.link/abcDEF')).toBe('short_link_unsupported');
+    expect(unsupportedSpotifyReference('https://open.spotify.com/intl-de/album/1A2GTWGtFfWp7KSQTwWOyo')).toBe(
+      'album_link_unsupported',
+    );
+    expect(unsupportedSpotifyReference('spotify:album:1A2GTWGtFfWp7KSQTwWOyo')).toBe('album_link_unsupported');
+    expect(unsupportedSpotifyReference('irgendwas')).toBeNull();
   });
 
   it('meldet fehlende Verbindung ohne Netzwerkzugriff', async () => {

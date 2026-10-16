@@ -60,12 +60,14 @@ export function WishTab({ toast }: { toast: (message: string, tone?: 'success' |
     const timer = window.setTimeout(async () => {
       setSearching(true);
       try {
-        const response = await api.get<{ tracks: Track[]; limited: boolean }>(
+        const response = await api.get<{ tracks: Track[]; limited: boolean; unavailable: boolean }>(
           `/api/public/search?q=${encodeURIComponent(trimmed)}`,
         );
         if (id !== searchId.current) return;
         setResults(response.tracks);
-        setNotice(response.limited ? t('guest.wish.limited') : null);
+        setNotice(
+          response.limited ? t('guest.wish.limited') : response.unavailable ? t('guest.wish.unavailable') : null,
+        );
       } catch (e) {
         if (id === searchId.current) setNotice(t(guestErrorKey(e)));
       } finally {

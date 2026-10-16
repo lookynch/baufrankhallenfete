@@ -30,22 +30,33 @@ export async function searchTracks(
   spotify: SpotifyApi,
   query: string,
   now: number,
-): Promise<{ tracks: SpotifyTrack[]; limited: boolean }> {
+): Promise<{ tracks: SpotifyTrack[]; limited: boolean; unavailable: boolean }> {
   const normalized = normalizeQuery(query);
-  if (normalized.length < 3) return { tracks: [], limited: false };
+  if (normalized.length < 3) return { tracks: [], limited: false, unavailable: false };
   const cached = await db
     .prepare('SELECT results, fetched_at FROM search_cache WHERE query = ?1')
     .bind(normalized)
     .first<{ results: string; fetched_at: number }>();
   if (cached && now - cached.fetched_at < SEARCH_CACHE_MS) {
-    return { tracks: JSON.parse(cached.results) as SpotifyTrack[], limited: false };
+    return { tracks: JSON.parse(cached.results) as SpotifyTrack[], limited: false, unavailable: false };
   }
   const budget = await hitRateLimit(db, 'spotify:search', GLOBAL_SEARCH_LIMIT, GLOBAL_SEARCH_WINDOW_S, now);
   if (!budget.allowed) {
-    return { tracks: cached ? (JSON.parse(cached.results) as SpotifyTrack[]) : [], limited: !cached };
+    return {
+      tracks: cached ? (JSON.parse(cached.results) as SpotifyTrack[]) : [],
+      limited: !cached,
+      unavailable: false,
+    };
   }
   const result = await spotify.search(query.slice(0, 100));
-  if (!result.ok) return { tracks: cached ? (JSON.parse(cached.results) as SpotifyTrack[]) : [], limited: true };
+  if (!result.ok) {
+    const rateLimited = result.kind === 'rate_limited';
+    return {
+      tracks: cached ? (JSON.parse(cached.results) as SpotifyTrack[]) : [],
+      limited: !cached && rateLimited,
+      unavailable: !cached && !rateLimited,
+    };
+  }
   await db
     .prepare(
       `INSERT INTO search_cache (query, results, fetched_at) VALUES (?1, ?2, ?3)
@@ -53,7 +64,7 @@ export async function searchTracks(
     )
     .bind(normalized, JSON.stringify(result.value), now)
     .run();
-  return { tracks: result.value, limited: false };
+  return { tracks: result.value, limited: false, unavailable: false };
 }
 
 async function trackFromCache(db: D1Database, uri: string): Promise<SpotifyTrack | null> {

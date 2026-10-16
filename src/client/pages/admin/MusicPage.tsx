@@ -4,7 +4,17 @@ import { Cover, MoodBadge, SpotifyLogo } from '../../components/music.tsx';
 import { Badge, Button, Card, Empty, Field, Input, Notice, Select, Spinner } from '../../components/ui.tsx';
 import { api } from '../../lib/api.ts';
 import { berlinParts, formatDateTime, formatDayTime, formatTime, fromBerlin } from '../../lib/time.ts';
-import { LevelPicker, PageTitle, useAdmin, useAdminData, useInFlight } from './shared.tsx';
+import {
+  errorMessage,
+  LevelPicker,
+  PageTitle,
+  spotifyMessage,
+  useAdmin,
+  useAdminData,
+  useInFlight,
+} from './shared.tsx';
+
+const MAX_IMPORT_PAGES = 200;
 
 interface SetRow {
   id: number;
@@ -175,7 +185,14 @@ function AddSongs({ sets, onChange }: { sets: SetRow[]; onChange: () => Promise<
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const importing = useRef(false);
   const playlists = useAdminData<{
-    playlists: Array<{ uri: string; id: string; name: string; trackCount: number; owner: string }>;
+    playlists: Array<{
+      uri: string;
+      id: string;
+      name: string;
+      trackCount: number;
+      owner: string;
+      accessible: boolean | null;
+    }>;
   }>('/api/admin/spotify/playlists');
 
   useEffect(() => {
@@ -197,7 +214,7 @@ function AddSongs({ sets, onChange }: { sets: SetRow[]; onChange: () => Promise<
     let failed = false;
     setProgress({ done: 0, total: 1 });
     try {
-      for (;;) {
+      for (let page = 0; page < MAX_IMPORT_PAGES; page++) {
         const page = await run(() =>
           api.post<{ imported: number; next: number | null; total: number }>('/api/admin/library/import', {
             reference: ref,
@@ -211,7 +228,7 @@ function AddSongs({ sets, onChange }: { sets: SetRow[]; onChange: () => Promise<
         }
         imported += page.imported;
         setProgress({ done: Math.min(page.total, offset + 50), total: page.total });
-        if (page.next === null) break;
+        if (page.next === null || page.next <= offset) break;
         offset = page.next;
       }
     } finally {
@@ -267,23 +284,28 @@ function AddSongs({ sets, onChange }: { sets: SetRow[]; onChange: () => Promise<
           ) : null}
         </div>
         <h3 className="mt-6 mb-2 text-sm font-semibold text-muted">Playlists des Party-Accounts</h3>
-        {playlists.error ? <Notice tone="warning">Spotify nicht verbunden.</Notice> : null}
+        {playlists.error ? <Notice tone="warning">{errorMessage(playlists.error)}</Notice> : null}
         <ul className="flex max-h-80 flex-col gap-1.5 overflow-auto">
           {playlists.data?.playlists.map((p) => (
             <li
               key={p.id}
               className="flex items-center justify-between gap-2 rounded-xl bg-raised/50 px-3 py-2 text-sm"
             >
-              <span className="min-w-0 truncate">
+              <span className={`min-w-0 truncate ${p.accessible === false ? 'opacity-50' : ''}`}>
                 {p.name}{' '}
                 <span className="text-muted">
                   · {p.trackCount} Songs · {p.owner}
                 </span>
+                {p.accessible === false ? (
+                  <span className="block text-xs text-muted">
+                    Fremde Playlist – in Spotify kopieren, dann importieren
+                  </span>
+                ) : null}
               </span>
               <Button
                 size="sm"
                 variant="outline"
-                disabled={progress !== null}
+                disabled={progress !== null || p.accessible === false}
                 onClick={() => void importReference(p.uri)}
               >
                 Importieren
@@ -592,7 +614,7 @@ function SpotifyPanel() {
     return guard(action, async () => {
       const result = await run(() => api.post<{ ok: boolean; error?: string }>(`/api/admin/spotify/${action}`));
       if (result?.ok) notify('Befehl gesendet');
-      else if (result) notify(`Spotify hat abgelehnt: ${spotifyError(result.error)}`, 'danger');
+      else if (result) notify(`Spotify hat abgelehnt: ${spotifyMessage(result.error)}`, 'danger');
       await player.reload();
     });
   }
@@ -664,7 +686,7 @@ function SpotifyPanel() {
           </dl>
         ) : (
           <Notice tone="warning">
-            Kein aktives Gerät gefunden ({player.data ? spotifyError(player.data.error) : '…'}). Spotify auf dem
+            {player.data ? spotifyMessage(player.data.error) : 'Kein aktives Gerät gefunden.'} Spotify auf dem
             Abspielgerät öffnen und kurz abspielen.
           </Notice>
         )}
@@ -746,20 +768,6 @@ function PreshowCheck() {
       </Notice>
     </div>
   );
-}
-
-const spotifyErrors: Record<string, string> = {
-  not_connected: 'Spotify ist nicht verbunden',
-  no_device: 'kein aktives Abspielgerät',
-  rate_limited: 'zu viele Anfragen, kurz warten',
-  unauthorized: 'Freigabe ungültig, neu verbinden',
-  not_found: 'nicht gefunden',
-  client_error: 'Anfrage abgelehnt',
-  unknown: 'unbekannter Fehler',
-};
-
-function spotifyError(kind: string | undefined): string {
-  return (kind && spotifyErrors[kind]) ?? kind ?? 'unbekannter Fehler';
 }
 
 function normalizePlaylist(input: string): string {
