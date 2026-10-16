@@ -6,6 +6,7 @@ import { useI18n, type MessageKey } from '../../lib/i18n.tsx';
 import { usePolling } from '../../lib/polling.ts';
 import { theme } from '../../lib/theme.ts';
 import { legal } from '../../../shared/legal.ts';
+import { guestHome } from '../../../shared/pwa.ts';
 import { LegalLinks } from '../legal/LegalPages.tsx';
 import { VoteTab, type GuestState } from './VoteTab.tsx';
 import { WishTab } from './WishTab.tsx';
@@ -40,10 +41,10 @@ export function JoinPage() {
     void (async () => {
       try {
         await api.post('/api/public/join', { token });
-        navigate('/', { replace: true });
+        navigate(guestHome, { replace: true });
       } catch (e) {
         if (e instanceof ApiError && e.code === 'qr_expired') {
-          window.history.replaceState(null, '', '/');
+          window.history.replaceState(null, '', guestHome);
           setErrorKey('guest.qrExpired');
           return;
         }

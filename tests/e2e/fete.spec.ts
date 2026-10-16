@@ -136,7 +136,7 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser, ba
   await expect(tv.getByText(/^Datenschutz & Impressum: .+\/datenschutz$/)).toBeVisible();
   await expect(tv.getByRole('img', { name: 'Musikdaten von Spotify' })).toBeVisible();
   const qrUrl = await qr.getAttribute('data-qr-url');
-  expect(qrUrl).toMatch(/\/v\/[A-Z2-7]{8}$/);
+  expect(qrUrl).toMatch(/\/fete\/v\/[A-Z2-7]{8}$/);
 
   const { defaultBrowserType: _browserType, ...iphone } = devices['iPhone 13'];
   const guestContext = await browser.newContext({
@@ -147,7 +147,7 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser, ba
   const guest = await guestContext.newPage();
   watchConsole(guest);
   await guest.goto(new URL(qrUrl!).pathname);
-  await expect(guest).toHaveURL(/\/$/);
+  await expect(guest).toHaveURL(/\/fete\/$/);
   await expect(guest.getByText('Welcher Song soll laufen?')).toBeVisible({ timeout: 20_000 });
   const cover = guest.locator('ul li img').first();
   await expect(cover).toHaveAttribute('src', /^\/api\/cover\/[0-9a-f]{40}$/);
@@ -261,10 +261,11 @@ test('Rechtsseiten: Links, Inhalte, Sprache und Anker ohne API-Aufrufe', async (
   expect(apiCalls).toEqual([]);
 
   await page.goto('/');
+  await expect(page).toHaveURL(/\/fete\/$/);
   await expect(page.getByText('Scanne den QR-Code am Bildschirm')).toBeVisible();
   await expect(page.getByText(/^Privat betrieben von Jakob Kaiser\./)).toBeVisible();
   await page.getByRole('link', { name: 'Datenschutz' }).click();
-  await expect(page).toHaveURL(/\/datenschutz$/);
+  await expect(page).toHaveURL(/\/fete\/datenschutz$/);
   await expect(page.getByText('Widerspruchsrecht nach Art. 21 DSGVO')).toBeVisible();
   await page.screenshot({ path: join(shots, 'datenschutz.png'), fullPage: true });
 
@@ -310,7 +311,8 @@ test('Passkey: Einladung, Anmeldung, Kontoverwaltung und Web-App-Manifeste', asy
   expect(adminManifest.errors).toEqual([]);
   expect(JSON.parse(adminManifest.data ?? '{}')).toMatchObject({
     id: '/admin/',
-    scope: '/admin/',
+    scope: '/admin',
+    start_url: '/admin/',
     display: 'standalone',
   });
 
@@ -330,9 +332,13 @@ test('Passkey: Einladung, Anmeldung, Kontoverwaltung und Web-App-Manifeste', asy
   await page.screenshot({ path: join(shots, 'admin-passkey-login.png') });
 
   const guest = await context.newPage();
-  await guest.goto('/datenschutz');
-  const guestManifest = await (await context.newCDPSession(guest)).send('Page.getAppManifest');
+  const guestCdp = await context.newCDPSession(guest);
+  await guest.goto('/fete/');
+  const guestManifest = await guestCdp.send('Page.getAppManifest');
   expect(guestManifest.url).toMatch(/\/pwa\/guest\.webmanifest$/);
-  expect(JSON.parse(guestManifest.data ?? '{}')).toMatchObject({ id: '/', start_url: '/' });
+  expect(guestManifest.errors).toEqual([]);
+  expect(JSON.parse(guestManifest.data ?? '{}')).toMatchObject({ id: '/fete/', scope: '/fete', start_url: '/fete/' });
+  await guest.goto('/datenschutz');
+  expect((await guestCdp.send('Page.getAppManifest')).url).toBe('');
   expect(cspErrors).toEqual([]);
 });

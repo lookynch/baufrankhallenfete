@@ -1,6 +1,7 @@
 import { Cover, MoodBadge, QrCode, SpotifyLogo } from '../../components/music.tsx';
 import { useI18n } from '../../lib/i18n.tsx';
 import { theme } from '../../lib/theme.ts';
+import { guestHome } from '../../../shared/pwa.ts';
 import { formatDuration, formatTime, useNow } from '../../lib/time.ts';
 
 interface NowPlaying {
@@ -115,7 +116,7 @@ export function TvScreen({ state, offsetMs }: { state: MusicState; offsetMs: num
   const round = state.round;
   const sorted = round ? [...round.candidates].sort((a, b) => (b.votes ?? 0) - (a.votes ?? 0)) : [];
   const maxVotes = Math.max(1, ...sorted.map((c) => c.votes ?? 0));
-  const qrUrl = state.presence ? `${window.location.origin}/v/${state.presence.token}` : null;
+  const qrUrl = state.presence ? `${window.location.origin}${guestHome}v/${state.presence.token}` : null;
 
   return (
     <main className="bg-party grid h-dvh grid-cols-[1fr_minmax(0,0.9fr)] grid-rows-[auto_1fr_auto] gap-6 p-8">

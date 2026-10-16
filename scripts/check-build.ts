@@ -6,7 +6,7 @@ import { iconPath, manifestPath, pwaApps, pwaIcons, type PwaApp } from '../src/s
 const dist = join(import.meta.dirname, '..', 'dist');
 const problems: string[] = [];
 
-for (const file of ['index.html', '_routes.json', '_headers', 'logo.svg']) {
+for (const file of ['index.html', '_routes.json', '_headers', '_redirects', 'logo.svg']) {
   if (!existsSync(join(dist, file))) problems.push(`dist/${file} fehlt`);
 }
 const manifestIds = new Set<string>();
@@ -40,10 +40,28 @@ if (existsSync(join(dist, '_headers'))) {
     problems.push('CSP in public/_headers weicht von src/server/security/headers.ts ab');
   }
 }
-if (existsSync(join(dist, 'index.html'))) {
-  const html = readFileSync(join(dist, 'index.html'), 'utf8');
-  if (/<script(?![^>]*\bsrc=)[^>]*>/i.test(html)) problems.push('index.html enthält Inline-Skripte (CSP)');
-  if (/\sstyle=/i.test(html)) problems.push('index.html enthält Inline-Styles (CSP)');
+const entries: Array<[string, PwaApp | null]> = [
+  ['index.html', null],
+  ...(Object.keys(pwaApps) as PwaApp[]).map((app): [string, PwaApp] => [
+    `${pwaApps[app].scope.slice(1)}/index.html`,
+    app,
+  ]),
+];
+for (const [file, app] of entries) {
+  if (!existsSync(join(dist, file))) {
+    problems.push(`dist/${file} fehlt`);
+    continue;
+  }
+  const html = readFileSync(join(dist, file), 'utf8');
+  if (/<script(?![^>]*\bsrc=)[^>]*>/i.test(html)) problems.push(`${file} enthält Inline-Skripte (CSP)`);
+  if (/\sstyle=/i.test(html)) problems.push(`${file} enthält Inline-Styles (CSP)`);
+  const manifests = [...html.matchAll(/<link rel="manifest" href="([^"]+)"/g)].map((m) => m[1]);
+  const expected = app ? [manifestPath(app)] : [];
+  if (JSON.stringify(manifests) !== JSON.stringify(expected)) {
+    problems.push(
+      `${file} verlinkt ${manifests.join(', ') || 'kein Manifest'} statt ${expected.join(', ') || 'keinem'}`,
+    );
+  }
 }
 
 if (problems.length) {

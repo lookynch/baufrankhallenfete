@@ -3,20 +3,23 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { LanguageSwitch } from '../../components/ui.tsx';
 import { useI18n } from '../../lib/i18n.tsx';
 import { theme } from '../../lib/theme.ts';
+import { guestHome, pwaAppAt, pwaApps } from '../../../shared/pwa.ts';
 import { imprint, privacy, type Block, type LegalDocument } from './texts.ts';
 
 const INLINE = /(`[^`]+`|https:\/\/\S*[^\s.,;:)]|[\w.+-]+@[\w-]+(?:\.[\w-]+)+)/;
 
 export function LegalLinks({ admin }: { admin?: boolean }) {
   const { t } = useI18n();
+  const { pathname } = useLocation();
+  const base = pwaAppAt(pathname) === 'guest' ? pwaApps.guest.scope : '';
   const target = admin ? '_blank' : undefined;
   const linkClass = 'underline underline-offset-2 hover:text-fg';
   return (
     <nav className="flex justify-center gap-4 text-xs text-muted">
-      <Link to={admin ? '/datenschutz#admin' : '/datenschutz'} target={target} className={linkClass}>
+      <Link to={admin ? '/datenschutz#admin' : `${base}/datenschutz`} target={target} className={linkClass}>
         {t('legal.privacy')}
       </Link>
-      <Link to="/impressum" target={target} className={linkClass}>
+      <Link to={`${base}/impressum`} target={target} className={linkClass}>
         {t('legal.imprint')}
       </Link>
     </nav>
@@ -154,7 +157,11 @@ function LegalPage({ doc }: { doc: LegalDocument }) {
       <header className="sticky top-0 z-20 flex items-center justify-between gap-3 bg-bg/80 px-4 py-3 backdrop-blur">
         <button
           type="button"
-          onClick={() => (location.key === 'default' ? navigate('/') : navigate(-1))}
+          onClick={() =>
+            location.key === 'default'
+              ? window.location.assign(location.hash === '#admin' ? pwaApps.admin.startUrl : guestHome)
+              : navigate(-1)
+          }
           className="flex items-center gap-2 font-display font-bold"
         >
           <img src={theme.event.logo} alt="" className="h-8 w-8" />
