@@ -103,7 +103,7 @@ describe('Grundlagen', () => {
     const h = new Harness();
     const res = await h.client().request('GET', '/api/health');
     expect(res.status).toBe(200);
-    expect(res.json.schemaVersion).toBe(2);
+    expect(res.json.schemaVersion).toBe(3);
     expect(res.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");
     expect(res.headers.get('Content-Security-Policy')).not.toContain('challenges.cloudflare.com');
     expect(res.headers.get('Cache-Control')).toBe('no-store');

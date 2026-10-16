@@ -1,3 +1,5 @@
+import { legal } from '../../shared/legal.ts';
+
 export interface RateLimitResult {
   allowed: boolean;
   count: number;
@@ -46,6 +48,6 @@ export async function clearRateLimit(db: D1Database, key: string): Promise<void>
 export async function pruneRateLimits(db: D1Database, now: number): Promise<void> {
   await db
     .prepare('DELETE FROM rate_limits WHERE window_start < ?1')
-    .bind(now - 24 * 3_600_000)
+    .bind(now - legal.retention.shortHours * 3_600_000)
     .run();
 }

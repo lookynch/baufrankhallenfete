@@ -763,10 +763,9 @@ export function AuditPage() {
       user_name: string | null;
     }>;
   }>(`/api/admin/audit${before ? `?before=${before}` : ''}`);
-  const limits = useAdminData<{ limits: Array<{ key: string; window_start: number; count: number }> }>(
-    '/api/admin/ratelimits',
-    30_000,
-  );
+  const limits = useAdminData<{
+    limits: Array<{ key: string; window_start: number; count: number; label: string | null }>;
+  }>('/api/admin/ratelimits', 30_000);
   const entries = audit.data?.entries ?? [];
   return (
     <div className="flex flex-col gap-6">
@@ -821,7 +820,9 @@ export function AuditPage() {
               <ul className="flex flex-col gap-1.5 text-xs">
                 {limits.data.limits.map((l) => (
                   <li key={`${l.key}-${l.window_start}`} className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 truncate font-mono">{l.key}</span>
+                    <span className="min-w-0 truncate font-mono" title={l.key}>
+                      {l.label ? `login:${l.label}` : l.key}
+                    </span>
                     <span className="tabular-nums">{l.count}</span>
                     <Button
                       size="sm"

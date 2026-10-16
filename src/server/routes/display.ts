@@ -135,7 +135,7 @@ async function ledgerState(db: D1Database, settings: Settings, now: number) {
     totalCrates: stats.totalCrates,
     forecastCostCents: stats.forecastCostCents,
     costPerHourCents: Math.round(stats.ratePerHour * settings.ledger.cratePriceCents),
-    journal: await journal(db, 14),
+    journal: (await journal(db, 14)).map(({ created_by: _id, created_by_name: _name, ...entry }) => entry),
     balances: (await accountBalances(db)).filter((a) => a.debit_cents > 0 || a.credit_cents > 0),
   };
 }

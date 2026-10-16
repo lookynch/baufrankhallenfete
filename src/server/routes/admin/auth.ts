@@ -181,17 +181,17 @@ async function recoveryHash(pepper: string, code: string): Promise<string> {
   return hmacHex(pepper, `recovery:${code.replace(/[^A-Z2-7]/gi, '').toUpperCase()}`);
 }
 
+export async function loginUserKey(secret: string, username: string): Promise<string> {
+  return (await hmacHex(secret, `login:${username.toLowerCase()}`)).slice(0, 16);
+}
+
 function newRecoveryCode(): string {
   const raw = base32Encode(randomBytes(8)).slice(0, 12);
   return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
 }
 
 async function issueSession(c: AppContext, userId: number): Promise<void> {
-  const now = c.var.rt.now();
-  const token = await createSession(c.env.DB, userId, now, {
-    ipHash: await clientIpHash(c),
-    userAgent: c.req.header('User-Agent') ?? '',
-  });
+  const token = await createSession(c.env.DB, userId, c.var.rt.now());
   setCookie(c, ADMIN_COOKIE, token, {
     path: '/',
     secure: true,
@@ -335,7 +335,7 @@ authRoutes.post('/login', async (c) => {
   await rateLimit(c, `login-ip:${ip.hash}`, 30, 900);
   if (ip.netHash !== ip.hash) await rateLimit(c, `login-net:${ip.netHash}`, 60, 900);
   const input = await body(c, z.object({ username: z.string().trim().max(40), password: z.string().max(256) }));
-  await rateLimit(c, `login:${input.username.toLowerCase()}:${ip.hash}`, 5, 900);
+  await rateLimit(c, `login:${await loginUserKey(c.env.IP_HASH_SECRET, input.username)}:${ip.hash}`, 5, 900);
   const iterations = iterationsFrom(c.env.PBKDF2_ITERATIONS);
   const user = await c.env.DB.prepare('SELECT * FROM admin_users WHERE username = ?1 AND disabled = 0')
     .bind(input.username)

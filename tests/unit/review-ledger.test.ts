@@ -3,7 +3,7 @@ import { createApp } from '../../src/server/app.ts';
 import type { Env } from '../../src/server/env.ts';
 import { buzzerSignature } from '../../src/server/routes/buzzer.ts';
 import { claimPairing, pollPairing, startPairing } from '../../src/server/services/displays.ts';
-import { BUCKET_MS, bucketOf, consumptionStats, type Bucket } from '../../src/server/services/ledger.ts';
+import { bookManual, BUCKET_MS, bucketOf, consumptionStats, type Bucket } from '../../src/server/services/ledger.ts';
 import { loadSettings, saveSettings } from '../../src/server/services/settings.ts';
 import { defaultSettings } from '../../src/shared/settings.ts';
 import { FakeSpotify } from '../helpers/fake-spotify.ts';
@@ -20,11 +20,14 @@ function harness(time: number) {
   const spotify = new FakeSpotify(clock.now);
   const app = createApp({ now: clock.now, spotify: () => spotify });
   const pending: Promise<unknown>[] = [];
-  const request = async (path: string, init: { body: string; headers?: Record<string, string>; ip?: string }) => {
+  const request = async (
+    path: string,
+    init: { body?: string; method?: string; headers?: Record<string, string>; ip?: string },
+  ) => {
     const response = await app.request(
       `${ORIGIN}${path}`,
       {
-        method: 'POST',
+        method: init.method ?? 'POST',
         body: init.body,
         headers: {
           Host: 'fete.example',
@@ -207,5 +210,40 @@ describe('Display-Kopplung (#38, #39)', () => {
       .bind(pairing.code)
       .first<{ n: number }>();
     expect(left?.n).toBe(0);
+  });
+});
+
+describe('Bar-Ledger-Display', () => {
+  it('liefert Buchungen ohne Admin-Kennung', async () => {
+    const h = harness(EVENING);
+    const db = h.env.DB;
+    await db
+      .prepare(
+        "INSERT INTO admin_users (id, username, display_name, role, password_hash, totp_secret_enc, created_at) VALUES (1, 'anna', 'Anna', 'owner', 'x', 'x', 0)",
+      )
+      .run();
+    const input = {
+      kind: 'purchase' as const,
+      debitAccount: '3980',
+      creditAccount: '1600',
+      amountCents: 4_200,
+      quantity: 0,
+      text: 'Getränkeeinkauf',
+      effectiveAt: EVENING,
+    };
+    await bookManual(db, input, 1, EVENING);
+    const pairing = await startPairing(db, EVENING);
+    await claimPairing(db, h.env.ENC_KEY, { code: pairing.code, name: 'Bar', kind: 'bar_ledger' }, 1, EVENING);
+    const paired = await pollPairing(db, h.env.ENC_KEY, pairing.code, pairing.secret, EVENING);
+    if (paired.status !== 'paired') throw new Error(paired.status);
+    const state = await h.request('/api/display/state', {
+      method: 'GET',
+      headers: { Cookie: `__Host-display=${paired.token}` },
+    });
+    const journal = state.json.journal as Array<Record<string, unknown>>;
+    expect(journal).toHaveLength(1);
+    expect(journal[0]).toMatchObject({ booking_no: 'BF-0001', text: 'Getränkeeinkauf' });
+    expect(journal[0]).not.toHaveProperty('created_by');
+    expect(journal[0]).not.toHaveProperty('created_by_name');
   });
 });

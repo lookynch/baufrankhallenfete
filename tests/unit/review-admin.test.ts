@@ -333,6 +333,47 @@ describe('Audit und TOTP-Limits', () => {
   });
 });
 
+describe('Datensparsamkeit im Adminbereich', () => {
+  it('speichert Sessions ohne IP und User-Agent', async () => {
+    const h = new Harness();
+    await createOwner(h);
+    const sessions = await h.env.DB.prepare('SELECT ip_hash, user_agent FROM admin_sessions').all();
+    expect(sessions.results).toEqual([{ ip_hash: null, user_agent: null }]);
+  });
+
+  it('führt Login-Limits ohne Klartext-Benutzernamen und benennt nur bekannte Konten', async () => {
+    const h = new Harness();
+    const { client: owner } = await createOwner(h);
+    const attempt = (username: string) =>
+      h.client('198.51.100.7').request('POST', '/api/admin/auth/login', { username, password: 'falsch-falsch' });
+    expect((await attempt('Anna')).status).toBe(401);
+    expect((await attempt('versehentlich-passwort')).status).toBe(401);
+
+    const { results } = await h.env.DB.prepare("SELECT key FROM rate_limits WHERE key LIKE 'login:%'").all<{
+      key: string;
+    }>();
+    expect(results).toHaveLength(2);
+    for (const { key } of results) expect(key).toMatch(/^login:[0-9a-f]{16}:[0-9a-f]{32}$/);
+    const stored = await h.env.DB.prepare('SELECT key FROM rate_limits').all<{ key: string }>();
+    expect(stored.results.map((r) => r.key).join(' ')).not.toMatch(/anna|versehentlich/i);
+
+    const limits = (await owner.request('GET', '/api/admin/ratelimits')).json.limits as Array<{
+      key: string;
+      label: string | null;
+    }>;
+    const logins = limits.filter((l) => l.key.startsWith('login:'));
+    expect(logins.map((l) => l.label).sort()).toEqual(['anna', null]);
+    expect(limits.filter((l) => !l.key.startsWith('login:')).every((l) => l.label === null)).toBe(true);
+
+    const annaKey = logins.find((l) => l.label === 'anna')!.key;
+    expect((await owner.request('POST', '/api/admin/ratelimits/clear', { key: annaKey })).status).toBe(200);
+    const cleared = await h.env.DB.prepare("SELECT entity_id FROM audit_log WHERE action = 'ratelimit_clear'").first<{
+      entity_id: string;
+    }>();
+    expect(cleared).toEqual({ entity_id: 'login' });
+  });
+});
+
 describe('Passwort-Rehash', () => {
   it('rehasht nur, wenn beide Ableitungen ins CPU-Budget passen', async () => {
     const h = new Harness();

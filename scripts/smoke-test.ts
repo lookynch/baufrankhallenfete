@@ -70,7 +70,7 @@ async function waitForServer() {
 const checks: Array<[string, () => Promise<boolean>]> = [
   [
     'Health liefert Schema-Version',
-    async () => ((await (await fetch(`${base}/api/health`)).json()) as { schemaVersion: number }).schemaVersion === 2,
+    async () => ((await (await fetch(`${base}/api/health`)).json()) as { schemaVersion: number }).schemaVersion === 3,
   ],
   [
     'Startseite mit CSP aus _headers, ohne Fremdskripte',

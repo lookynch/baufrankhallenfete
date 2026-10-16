@@ -9,6 +9,7 @@ import { hitRateLimit } from '../security/ratelimit.ts';
 import { readBudget, throttleFactor } from '../services/budget.ts';
 import { openRound, votingActive } from '../services/rounds.ts';
 import { loadSettings } from '../services/settings.ts';
+import { legal } from '../../shared/legal.ts';
 import type { Settings } from '../../shared/settings.ts';
 import { castVote, ipVoteLimit, myVote } from '../services/votes.ts';
 import { createWish, guestWishes, searchTracks, upvoteWish, WishError } from '../services/wishes.ts';
@@ -17,6 +18,7 @@ import { roundView, type RoundView } from '../views.ts';
 
 export const publicRoutes = new Hono<AppEnv>();
 
+const HOUR = 3_600_000;
 const MIN_GUEST_POLL_MS = 3_000;
 const MAX_GUEST_POLL_MS = 5 * 60_000;
 const GUEST_POLL_JITTER_MS = 20_000;
@@ -58,9 +60,13 @@ publicRoutes.post('/join', async (c) => {
     if (ip.netHash !== ip.hash) await limit(c, 'join-net', 300, 600, ip.netHash);
   }
   const settings = await loadSettings(c.env.DB, now);
+  const fresh = Math.min(
+    Math.max(settings.event.endsAt + 6 * HOUR, now + 12 * HOUR),
+    now + legal.retention.cookieMaxHours * HOUR,
+  );
   const identity: GuestIdentity = {
     deviceId: existing?.deviceId ?? newDeviceId(),
-    expiresAt: Math.max(settings.event.endsAt + 6 * 3_600_000, now + 12 * 3_600_000),
+    expiresAt: existing ? Math.min(existing.expiresAt, fresh) : fresh,
   };
   await c.env.DB.prepare(
     `INSERT INTO devices (id, created_at, ip_key, last_seen_at) VALUES (?1, ?2, ?3, ?2)

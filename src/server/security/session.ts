@@ -15,19 +15,14 @@ export interface AdminPrincipal {
   reauthAt: number;
 }
 
-export async function createSession(
-  db: D1Database,
-  userId: number,
-  now: number,
-  meta: { ipHash: string; userAgent: string },
-): Promise<string> {
+export async function createSession(db: D1Database, userId: number, now: number): Promise<string> {
   const token = randomToken(32);
   await db
     .prepare(
-      `INSERT INTO admin_sessions (token_hash, user_id, created_at, last_seen_at, expires_at, reauth_at, ip_hash, user_agent)
-       VALUES (?1, ?2, ?3, ?3, ?4, ?3, ?5, ?6)`,
+      `INSERT INTO admin_sessions (token_hash, user_id, created_at, last_seen_at, expires_at, reauth_at)
+       VALUES (?1, ?2, ?3, ?3, ?4, ?3)`,
     )
-    .bind(await sha256Hex(token), userId, now, now + SESSION_ABSOLUTE_MS, meta.ipHash, meta.userAgent.slice(0, 200))
+    .bind(await sha256Hex(token), userId, now, now + SESSION_ABSOLUTE_MS)
     .run();
   return token;
 }

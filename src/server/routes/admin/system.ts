@@ -28,6 +28,7 @@ import {
   createInvite,
   INVITE_TTL_MS,
   inviteTarget,
+  loginUserKey,
   requireOwner,
   requireReauth,
   revokeInvites,
@@ -313,18 +314,35 @@ systemRoutes.get('/audit', async (c) => {
 
 systemRoutes.get('/ratelimits', async (c) => {
   const now = c.var.rt.now();
-  const { results } = await c.env.DB.prepare(
-    "SELECT key, window_start, count FROM rate_limits WHERE window_start > ?1 AND key NOT LIKE 'stat:%' AND key NOT LIKE 'spotify:%' ORDER BY count DESC LIMIT 50",
-  )
+  const db = c.env.DB;
+  const { results } = await db
+    .prepare(
+      "SELECT key, window_start, count FROM rate_limits WHERE window_start > ?1 AND key NOT LIKE 'stat:%' AND key NOT LIKE 'spotify:%' ORDER BY count DESC LIMIT 50",
+    )
     .bind(now - 3_600_000)
-    .all();
-  return c.json({ limits: results });
+    .all<{ key: string; window_start: number; count: number }>();
+  const users = await db.prepare('SELECT username FROM admin_users').all<{ username: string }>();
+  const usernames = new Map(
+    await Promise.all(
+      users.results.map(async (u) => [await loginUserKey(c.env.IP_HASH_SECRET, u.username), u.username] as const),
+    ),
+  );
+  return c.json({
+    limits: results.map((l) => {
+      const [kind, subject = ''] = l.key.split(':');
+      return { ...l, label: kind === 'login' ? (usernames.get(subject) ?? null) : null };
+    }),
+  });
 });
 
 systemRoutes.post('/ratelimits/clear', async (c) => {
   const { key } = await body(c, z.object({ key: z.string().min(1).max(200) }));
   await clearRateLimit(c.env.DB, key);
-  await audit(c.env.DB, c.var.rt.now(), { userId: c.var.admin.userId, action: 'ratelimit_clear', entityId: key });
+  await audit(c.env.DB, c.var.rt.now(), {
+    userId: c.var.admin.userId,
+    action: 'ratelimit_clear',
+    entityId: key.split(':')[0],
+  });
   return c.json({ ok: true });
 });
 
