@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { Cover, MoodBadge, SpotifyLogo } from '../../components/music.tsx';
-import { Badge, Button, Card, Empty, Field, Input, Notice, Select, Spinner } from '../../components/ui.tsx';
+import { Badge, Button, Card, Empty, Field, Input, Notice, Select } from '../../components/ui.tsx';
 import { api } from '../../lib/api.ts';
 import { berlinParts, formatDateTime, formatDayTime, formatTime, fromBerlin } from '../../lib/time.ts';
 import {
   errorMessage,
   LevelPicker,
+  Loading,
   PageTitle,
   spotifyMessage,
   useAdmin,
@@ -101,7 +102,7 @@ function Library({ sets }: { sets: SetRow[] }) {
   const [query, setQuery] = useState('');
   const [submitted, setSubmitted] = useState('');
   const path = `/api/admin/songs?${new URLSearchParams({ ...(setId ? { setId } : {}), ...(level ? { level } : {}), ...(submitted ? { q: submitted } : {}) })}`;
-  const { data, reload } = useAdminData<{ songs: Song[] }>(path);
+  const { data, error, reload } = useAdminData<{ songs: Song[] }>(path);
   const setById = new Map(sets.map((s) => [s.id, s]));
 
   async function update(id: number, patch: Record<string, unknown>) {
@@ -118,7 +119,12 @@ function Library({ sets }: { sets: SetRow[] }) {
           setSubmitted(query);
         }}
       >
-        <Input placeholder="Titel oder Künstler" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <Input
+          placeholder="Titel oder Künstler"
+          maxLength={100}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
         <Select value={setId} onChange={(e) => setSetId(e.target.value)}>
           <option value="">Alle Sets</option>
           {sets.map((s) => (
@@ -140,7 +146,7 @@ function Library({ sets }: { sets: SetRow[] }) {
         </Button>
       </form>
       {!data ? (
-        <Spinner />
+        <Loading error={error} />
       ) : data.songs.length === 0 ? (
         <Empty>Keine Songs. Unter „Songs hinzufügen“ Playlists oder Titel importieren.</Empty>
       ) : (
@@ -200,6 +206,7 @@ function AddSongs({ sets, onChange }: { sets: SetRow[]; onChange: () => Promise<
   }, [sets, setId]);
 
   async function search() {
+    if (query.trim().length < 2) return;
     const result = await run(() =>
       api.get<{ tracks: Track[] }>(`/api/admin/spotify/search?q=${encodeURIComponent(query)}`),
     );
@@ -322,7 +329,14 @@ function AddSongs({ sets, onChange }: { sets: SetRow[]; onChange: () => Promise<
             void search();
           }}
         >
-          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Titel, Künstler …" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Titel, Künstler …"
+            minLength={2}
+            maxLength={100}
+            required
+          />
           <Button type="submit" variant="outline">
             Suchen
           </Button>
@@ -364,7 +378,7 @@ function Sets({
     '/api/admin/settings',
   );
   const [editing, setEditing] = useState<Partial<SetRow> | null>(null);
-  if (!data || !settings.data) return <Spinner />;
+  if (!data || !settings.data) return <Loading error={settings.error} />;
   const { event, voting } = settings.data;
   const span = Math.max(1, event.endsAt - event.startsAt);
   const position = (t: number) => `${Math.min(100, Math.max(0, ((t - event.startsAt) / span) * 100))}%`;
@@ -483,7 +497,8 @@ function Sets({
               ? () =>
                   void guard('delete', async () => {
                     if (!confirm('Set löschen? Songs bleiben in der Bibliothek.')) return;
-                    await run(() => api.post(`/api/admin/sets/${editing.id}/delete`), 'Set gelöscht');
+                    const deleted = await run(() => api.post(`/api/admin/sets/${editing.id}/delete`), 'Set gelöscht');
+                    if (deleted === undefined) return;
                     setEditing(null);
                     await reload();
                   })
@@ -602,7 +617,7 @@ function SpotifyPanel() {
     if (settings.data) setPreshow(settings.data.preshow.playlistUri ?? '');
   }, [settings.data]);
 
-  if (!status.data) return <Spinner />;
+  if (!status.data) return <Loading error={status.error} />;
   const s = status.data;
 
   async function connect() {
@@ -619,13 +634,19 @@ function SpotifyPanel() {
     });
   }
 
-  async function savePreshow(level?: number) {
-    const uri = preshow.trim() ? normalizePlaylist(preshow.trim()) : null;
-    await run(
-      () => api.put('/api/admin/settings/preshow', { playlistUri: uri, ...(level ? { level } : {}) }),
-      'Gespeichert',
-    );
+  async function savePreshow(patch: { playlistUri: string | null } | { level: number }) {
+    await run(() => api.put('/api/admin/settings/preshow', patch), 'Gespeichert');
     await settings.reload();
+  }
+
+  function savePlaylist() {
+    const input = preshow.trim();
+    const uri = input ? normalizePlaylist(input) : null;
+    if (uri !== null && !uri.startsWith('spotify:playlist:')) {
+      notify('Kein gültiger Playlist-Link (open.spotify.com/playlist/… oder spotify:playlist:…).', 'danger');
+      return;
+    }
+    void savePreshow({ playlistUri: uri });
   }
 
   return (
@@ -731,12 +752,15 @@ function SpotifyPanel() {
               className="min-w-[20rem]"
             />
           </Field>
-          <Button onClick={() => void savePreshow()}>Speichern</Button>
+          <Button onClick={savePlaylist}>Speichern</Button>
         </div>
         <PreshowCheck key={settings.data?.preshow.playlistUri ?? 'none'} />
         <div className="mt-4">
           <span className="mb-1 block text-sm text-muted">Stimmungslevel der Playlist</span>
-          <LevelPicker value={settings.data?.preshow.level ?? 2} onChange={(l) => l && void savePreshow(l)} />
+          <LevelPicker
+            value={settings.data?.preshow.level ?? 2}
+            onChange={(l) => l && void savePreshow({ level: l })}
+          />
         </div>
       </Card>
     </div>

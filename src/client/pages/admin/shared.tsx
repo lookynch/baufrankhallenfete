@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Button, Field, Input, Notice } from '../../components/ui.tsx';
+import { Button, Field, Input, Notice, Spinner } from '../../components/ui.tsx';
 import { api, ApiError } from '../../lib/api.ts';
 import { passkeysSupported, signInWithPasskey } from '../../lib/passkey.ts';
 
@@ -62,6 +62,20 @@ const messages: Record<string, string> = {
   album_link_unsupported: 'Alben lassen sich nicht importieren – einzelne Songs oder eine Playlist verwenden.',
   already_bootstrapped: 'Es gibt bereits einen Owner.',
   invalid_bootstrap_token: 'Bootstrap-Token falsch.',
+  no_neighbor: 'Der Eintrag steht schon ganz oben bzw. unten.',
+  no_slot_available: 'Hinter dem laufenden Song ist kein Platz mehr frei – bitte später erneut versuchen.',
+  song_not_found: 'Song nicht gefunden.',
+  song_inactive: 'Der Song ist gesperrt – erst in der Bibliothek wieder aktivieren.',
+  set_not_found: 'Das Set gibt es nicht mehr – Seite neu laden.',
+  wish_not_found: 'Wunsch nicht gefunden.',
+  wish_not_open: 'Der Wunsch wurde bereits entschieden.',
+  same_account: 'Soll- und Habenkonto müssen verschieden sein.',
+  unknown_account: 'Unbekanntes Konto – erst unter Buchhaltung anlegen.',
+  invalid_amount: 'Ungültiger Betrag.',
+  entry_not_found: 'Buchung nicht gefunden.',
+  invalid_query: 'Ungültige Suche – mindestens 2 und höchstens 100 Zeichen.',
+  internal_error: 'Interner Serverfehler – bitte erneut versuchen.',
+  server_not_configured: 'Server nicht konfiguriert (Secrets fehlen).',
   passkey_failed: 'Passkey konnte nicht bestätigt werden.',
   passkey_exists: 'Dieser Passkey ist bereits eingerichtet.',
   challenge_expired: 'Passkey-Anfrage abgelaufen – bitte erneut versuchen.',
@@ -283,15 +297,22 @@ export function useInFlight() {
 }
 
 export function useAdminData<T>(path: string | null, intervalMs?: number) {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<unknown>(null);
+  const [state, setState] = useState<{ path: string | null; data: T | null; error: unknown }>({
+    path,
+    data: null,
+    error: null,
+  });
+  const latest = useRef(0);
   const reload = useCallback(async () => {
     if (!path) return;
+    const request = ++latest.current;
     try {
-      setData(await api.get<T>(path));
-      setError(null);
-    } catch (e) {
-      setError(e);
+      const data = await api.get<T>(path);
+      if (request === latest.current) setState({ path, data, error: null });
+    } catch (error) {
+      if (request === latest.current) {
+        setState((previous) => ({ path, data: previous.path === path ? previous.data : null, error }));
+      }
     }
   }, [path]);
   useEffect(() => {
@@ -302,7 +323,12 @@ export function useAdminData<T>(path: string | null, intervalMs?: number) {
     }, intervalMs);
     return () => window.clearInterval(id);
   }, [reload, intervalMs]);
-  return { data, error, reload };
+  const current = state.path === path;
+  return { data: current ? state.data : null, error: current ? state.error : null, reload };
+}
+
+export function Loading({ error }: { error: unknown }) {
+  return error ? <Notice tone="danger">{errorMessage(error)}</Notice> : <Spinner />;
 }
 
 export function PageTitle({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {

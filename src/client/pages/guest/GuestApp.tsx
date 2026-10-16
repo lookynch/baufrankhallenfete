@@ -11,8 +11,12 @@ import { LegalLinks } from '../legal/LegalPages.tsx';
 import { VoteTab, type GuestState } from './VoteTab.tsx';
 import { WishTab } from './WishTab.tsx';
 
-const GUEST_ERRORS = ['ip_limit', 'round_closed', 'rate_limited', 'vote_invalidated'];
+const GUEST_ERRORS = ['ip_limit', 'round_closed', 'rate_limited', 'vote_invalidated', 'not_joined'];
 const JOIN_NETWORK_RETRIES = 3;
+
+export function sessionLost(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'not_joined';
+}
 
 export function guestErrorKey(error: unknown): MessageKey {
   if (error instanceof ApiError) {
@@ -168,7 +172,7 @@ export function GuestApp() {
         {data && tab === 'vote' ? (
           <VoteTab state={data} offsetMs={offsetMs} refresh={refresh} toast={toast.show} />
         ) : null}
-        {tab === 'wish' ? <WishTab toast={toast.show} /> : null}
+        {tab === 'wish' ? <WishTab toast={toast.show} refresh={refresh} /> : null}
         <footer className="mt-10 flex flex-col items-center gap-3 text-center text-xs leading-relaxed text-muted/80">
           <p>{t('privacy.note', privacyParams)}</p>
           <LegalLinks />

@@ -3,7 +3,7 @@ import { Cover, SpotifyLink, SpotifyLogo } from '../../components/music.tsx';
 import { Badge, Button, Empty, Input, Notice, Spinner } from '../../components/ui.tsx';
 import { api, ApiError } from '../../lib/api.ts';
 import { hasMessage, useI18n, type MessageKey } from '../../lib/i18n.tsx';
-import { guestErrorKey } from './GuestApp.tsx';
+import { guestErrorKey, sessionLost } from './GuestApp.tsx';
 
 interface Track {
   uri: string;
@@ -28,7 +28,13 @@ interface Wish {
 
 const statusTone = { open: 'warning', approved: 'success', rejected: 'danger', played: 'accent' } as const;
 
-export function WishTab({ toast }: { toast: (message: string, tone?: 'success' | 'danger') => void }) {
+export function WishTab({
+  toast,
+  refresh,
+}: {
+  toast: (message: string, tone?: 'success' | 'danger') => void;
+  refresh: () => Promise<void>;
+}) {
   const { t } = useI18n();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Track[]>([]);
@@ -41,10 +47,10 @@ export function WishTab({ toast }: { toast: (message: string, tone?: 'success' |
   const loadWishes = useCallback(async () => {
     try {
       setWishes((await api.get<{ wishes: Wish[] }>('/api/public/wishes')).wishes);
-    } catch {
-      setWishes((current) => current);
+    } catch (e) {
+      if (sessionLost(e)) void refresh();
     }
-  }, []);
+  }, [refresh]);
 
   useEffect(() => {
     void loadWishes();
@@ -70,12 +76,13 @@ export function WishTab({ toast }: { toast: (message: string, tone?: 'success' |
         );
       } catch (e) {
         if (id === searchId.current) setNotice(t(guestErrorKey(e)));
+        if (sessionLost(e)) void refresh();
       } finally {
         if (id === searchId.current) setSearching(false);
       }
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [query, t]);
+  }, [query, t, refresh]);
 
   async function wish(track: Track) {
     setBusy(track.uri);
@@ -88,6 +95,7 @@ export function WishTab({ toast }: { toast: (message: string, tone?: 'success' |
     } catch (e) {
       const key = e instanceof ApiError ? `guest.wish.error.${e.code}` : '';
       toast(hasMessage(key) ? t(key) : t(guestErrorKey(e)), 'danger');
+      if (sessionLost(e)) void refresh();
     } finally {
       setBusy(null);
     }
@@ -101,6 +109,7 @@ export function WishTab({ toast }: { toast: (message: string, tone?: 'success' |
       await loadWishes();
     } catch (e) {
       toast(t(guestErrorKey(e)), 'danger');
+      if (sessionLost(e)) void refresh();
     } finally {
       setBusy(null);
     }
