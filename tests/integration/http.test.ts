@@ -481,3 +481,46 @@ describe('Budget-Wächter für Gast-Cover', () => {
     expect(throttled.every((url) => url === null)).toBe(true);
   });
 });
+
+describe('Löschung', () => {
+  it('löscht auf Wunsch die Daten des eigenen Geräts samt Cookie', async () => {
+    const h = new Harness();
+    const token = await presenceToken('test-qr-secret-0123456789', h.clock.time);
+    const guest = h.client('2a02:810d:aaaa:1::5');
+    const other = h.client('2a02:810d:bbbb:1::5');
+    for (const client of [guest, other]) {
+      expect((await client.request('POST', '/api/public/join', { json: { token } })).status).toBe(200);
+    }
+    expect((await h.client().request('POST', '/api/public/forget')).status).toBe(401);
+    expect((await guest.request('POST', '/api/public/forget', { headers: { Origin: '' } })).status).toBe(403);
+
+    const forget = await guest.request('POST', '/api/public/forget');
+    expect(forget.status).toBe(200);
+    expect(forget.json).toEqual({ ok: true });
+    expect(forget.headers.get('Set-Cookie')).toMatch(/^__Host-fete=; Max-Age=0; Path=\/; Secure/);
+    expect(guest.cookies.has('__Host-fete')).toBe(false);
+    expect((await guest.request('GET', '/api/public/state')).json.joined).toBe(false);
+    expect((await h.env.DB.prepare('SELECT COUNT(*) AS n FROM devices').first<{ n: number }>())?.n).toBe(1);
+    expect((await other.request('GET', '/api/public/state')).json.joined).toBe(true);
+  });
+
+  it('löscht per Admin-Button alle Gästedaten, die eigene Session bleibt', async () => {
+    const h = new Harness();
+    const { client: owner } = await createOwner(h);
+    const token = await presenceToken('test-qr-secret-0123456789', h.clock.time);
+    await h.client('2a02:810d:aaaa:1::5').request('POST', '/api/public/join', { json: { token } });
+    expect((await owner.request('GET', '/api/admin/dashboard')).json.retentionRunAt).toBeNull();
+
+    expect((await owner.request('POST', '/api/admin/cleanup')).status).toBe(200);
+    const count = async (table: string) =>
+      (await h.env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{ n: number }>())?.n;
+    expect(await count('devices')).toBe(0);
+    expect(await count('rate_limits')).toBe(0);
+    expect((await owner.request('GET', '/api/admin/auth/me')).status).toBe(200);
+    const audit = await h.env.DB.prepare("SELECT after_json FROM audit_log WHERE action = 'event_data_cleanup'").first<{
+      after_json: string;
+    }>();
+    expect(JSON.parse(audit!.after_json)).toEqual({ votes: 0, devices: 1 });
+    expect((await owner.request('GET', '/api/admin/dashboard')).json.retentionRunAt).toBe(h.clock.time);
+  });
+});

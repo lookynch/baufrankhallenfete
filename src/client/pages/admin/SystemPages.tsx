@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { legal } from '../../../shared/legal.ts';
 import { Badge, Button, Card, Empty, Field, Input, Notice, Select, Spinner } from '../../components/ui.tsx';
 import { api } from '../../lib/api.ts';
 import { berlinParts, formatDateTime, formatEuro, formatTime, fromBerlin } from '../../lib/time.ts';
@@ -771,7 +772,7 @@ export function AuditPage() {
     <div className="flex flex-col gap-6">
       <PageTitle
         title="Audit & Sicherheit"
-        subtitle="Jede Änderung durch Admins wird protokolliert und kann nicht gelöscht werden."
+        subtitle={`Jede Änderung durch Admins wird protokolliert und nach ${legal.retention.auditDays} Tagen automatisch gelöscht.`}
       />
       <div className="grid gap-6 xl:grid-cols-[1fr_24rem]">
         <Card title="Audit-Log">
@@ -845,13 +846,14 @@ export function AuditPage() {
           {me.role === 'owner' ? (
             <Card title="Eventdaten bereinigen">
               <p className="mb-3 text-sm text-muted">
-                Löscht nach der Fete Stimmen, Geräte, IP-Schlüssel und Suchverlauf (Datenschutz). Musik, Buchhaltung und
-                Audit bleiben erhalten.
+                Löscht sofort alle Gästedaten: Stimmen, Geräte, Netz-Schlüssel, Suchverlauf und Rate-Limits; Wünsche
+                werden anonymisiert. Ohne Klick geschieht das automatisch {legal.retention.guestDays} Tage nach der
+                letzten Aktivität. Nur nach der Fete! Musik, Buchhaltung und Audit (ohne IP-Bezug) bleiben erhalten.
               </p>
               <Button
                 variant="danger"
                 onClick={() =>
-                  confirm('Wirklich alle Gästedaten löschen?') &&
+                  confirm('Wirklich alle Gästedaten sofort löschen? Die laufende Auszählung geht verloren.') &&
                   void run(() => api.post('/api/admin/cleanup'), 'Gästedaten gelöscht')
                 }
               >

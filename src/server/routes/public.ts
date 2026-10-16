@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { getCookie, setCookie } from 'hono/cookie';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { body, clientIp, fail, idParam, query, type AppContext, type AppEnv } from '../http.ts';
 import { decodeGuest, encodeGuest, GUEST_COOKIE, newDeviceId, type GuestIdentity } from '../security/guest.ts';
@@ -7,6 +7,7 @@ import { ipKeyHash } from '../security/ip.ts';
 import { verifyPresenceToken } from '../security/presence.ts';
 import { hitRateLimit } from '../security/ratelimit.ts';
 import { guestCoversAllowed, readBudget, throttleFactor, type RequestBudget } from '../services/budget.ts';
+import { forgetDeviceStatements } from '../services/retention.ts';
 import { openRound, votingActive } from '../services/rounds.ts';
 import { loadSettings } from '../services/settings.ts';
 import { legal } from '../../shared/legal.ts';
@@ -86,6 +87,13 @@ publicRoutes.post('/join', async (c) => {
     maxAge: Math.floor((identity.expiresAt - now) / 1000),
   });
   return c.json({ joined: true });
+});
+
+publicRoutes.post('/forget', async (c) => {
+  const guest = await requireGuest(c);
+  await c.env.DB.batch(forgetDeviceStatements(c.env.DB, guest.deviceId));
+  deleteCookie(c, GUEST_COOKIE, { path: '/', secure: true });
+  return c.json({ ok: true });
 });
 
 publicRoutes.get('/state', async (c) => {

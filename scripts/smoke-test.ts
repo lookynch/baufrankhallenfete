@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { RETENTION_SQL } from '../src/server/services/retention.ts';
 
 const root = join(import.meta.dirname, '..');
 const port = Number(process.env.SMOKE_PORT ?? 8799);
@@ -24,18 +25,17 @@ if (!existsSync(devVars)) {
 }
 
 rmSync(persist, { recursive: true, force: true });
-const migrate = spawnSync(
-  join(root, 'node_modules', '.bin', 'wrangler'),
-  ['d1', 'migrations', 'apply', 'fete', '--local', '--persist-to', persist],
-  {
+const wrangler = join(root, 'node_modules', '.bin', 'wrangler');
+const d1 = (...args: string[]) =>
+  spawnSync(wrangler, ['d1', ...args, '--local', '--persist-to', persist], {
     cwd: root,
     stdio: 'inherit',
     env: { ...process.env, CI: 'true' },
-  },
-);
-if (migrate.status !== 0) process.exit(migrate.status ?? 1);
+  }).status;
+const migrate = d1('migrations', 'apply', 'fete');
+if (migrate !== 0) process.exit(migrate ?? 1);
+const retentionRuns = [1, 2].map(() => d1('execute', 'fete', '--command', RETENTION_SQL));
 
-const wrangler = join(root, 'node_modules', '.bin', 'wrangler');
 const server = spawn(
   wrangler,
   ['pages', 'dev', 'dist', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', persist],
@@ -68,6 +68,7 @@ async function waitForServer() {
 }
 
 const checks: Array<[string, () => Promise<boolean>]> = [
+  ['Löschfristen-SQL läuft zweimal gegen lokale D1', async () => retentionRuns.every((status) => status === 0)],
   [
     'Health liefert Schema-Version',
     async () => ((await (await fetch(`${base}/api/health`)).json()) as { schemaVersion: number }).schemaVersion === 3,
@@ -94,6 +95,11 @@ const checks: Array<[string, () => Promise<boolean>]> = [
           headers: { 'Content-Type': 'application/json' },
         })
       ).status === 403,
+  ],
+  [
+    'Gast-Löschung ohne Cookie → 401',
+    async () =>
+      (await fetch(`${base}/api/public/forget`, { method: 'POST', headers: { Origin: base } })).status === 401,
   ],
   [
     'Buzzer mit falscher Signatur → 401',

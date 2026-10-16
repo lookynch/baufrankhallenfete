@@ -6,6 +6,7 @@ import { clearRateLimit, peekRateLimit } from '../../security/ratelimit.ts';
 import { audit, auditStatement } from '../../services/audit.ts';
 import { readBudget } from '../../services/budget.ts';
 import { claimPairing, DisplayError, displayKinds } from '../../services/displays.ts';
+import { getKv } from '../../services/kv.ts';
 import { setCoverage } from '../../services/library.ts';
 import {
   accountBalances,
@@ -18,6 +19,7 @@ import {
   reverseEntry,
 } from '../../services/ledger.ts';
 import { activeEntries, computeSchedule } from '../../services/playback.ts';
+import { purgeNow } from '../../services/retention.ts';
 import { expectedCloseAt, openRound } from '../../services/rounds.ts';
 import { loadSettings, saveSettings, SettingsError } from '../../services/settings.ts';
 import { authStatus } from '../../services/spotify-auth.ts';
@@ -84,6 +86,7 @@ systemRoutes.get('/dashboard', async (c) => {
     stats: consumptionStats(rows, settings, now),
     settings: { voting: settings.voting, event: settings.event },
     accessConfigured: Boolean(c.env.ACCESS_AUD && c.env.ACCESS_TEAM_DOMAIN),
+    retentionRunAt: (await getKv(db, 'retention_run'))?.updatedAt ?? null,
   });
 });
 
@@ -482,21 +485,7 @@ ownerRoutes.post('/users/:id/revoke-sessions', async (c) => {
 ownerRoutes.post('/cleanup', async (c) => {
   requireReauth(c);
   const now = c.var.rt.now();
-  const db = c.env.DB;
-  const results = await db.batch([
-    db.prepare('DELETE FROM votes'),
-    db.prepare('DELETE FROM devices'),
-    db.prepare("UPDATE wishes SET device_id = 'anon'"),
-    db.prepare("UPDATE wish_upvotes SET device_id = 'anon-' || rowid"),
-    db.prepare('DELETE FROM rate_limits'),
-    db.prepare('UPDATE admin_sessions SET ip_hash = NULL'),
-    db.prepare('UPDATE audit_log SET ip_hash = NULL'),
-    db.prepare('DELETE FROM search_cache'),
-  ]);
-  await audit(db, now, {
-    userId: c.var.admin.userId,
-    action: 'event_data_cleanup',
-    after: { votes: results[0]?.meta.changes ?? 0, devices: results[1]?.meta.changes ?? 0 },
-  });
+  const counts = await purgeNow(c.env.DB, now);
+  await audit(c.env.DB, now, { userId: c.var.admin.userId, action: 'event_data_cleanup', after: counts });
   return c.json({ ok: true });
 });

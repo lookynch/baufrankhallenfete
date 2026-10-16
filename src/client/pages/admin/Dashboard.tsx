@@ -35,6 +35,7 @@ interface DashboardData {
   stats: { totalCrates: number; totalCostCents: number; ratePerHour: number };
   settings: { voting: { enabled: boolean; startsAt: number }; event: { startsAt: number; endsAt: number } };
   accessConfigured: boolean;
+  retentionRunAt: number | null;
 }
 
 function ago(now: number, at: number | null | undefined): string {
@@ -74,6 +75,8 @@ export function Dashboard() {
   else if (budgetFraction >= 0.8)
     warnings.push('Request-Budget über 80 % – Polling stark gedrosselt, Gäste sehen keine Cover.');
   else if (budgetFraction >= 0.6) warnings.push('Request-Budget über 60 % – Polling wird automatisch gedrosselt.');
+  if (!data.retentionRunAt || now - data.retentionRunAt > 48 * 3_600_000)
+    warnings.push('Automatische Löschung lief seit über 48 h nicht – Workflow „Datenlöschung“ in GitHub prüfen.');
   const hints: string[] = [];
   if (!data.accessConfigured)
     hints.push('Cloudflare Access ist nicht eingerichtet – der Adminbereich ist nur durch Passwort und 2FA geschützt.');
