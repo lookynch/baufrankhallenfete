@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button, Field, Input, Notice } from '../../components/ui.tsx';
 import { api, ApiError } from '../../lib/api.ts';
+import { passkeysSupported, signInWithPasskey } from '../../lib/passkey.ts';
 
 export interface Me {
   id: number;
@@ -9,6 +10,9 @@ export interface Me {
   role: 'owner' | 'admin';
   reauthValid: boolean;
   recoveryCodesLeft: number;
+  hasPassword: boolean;
+  hasTotp: boolean;
+  passkeyCount: number;
 }
 
 const messages: Record<string, string> = {
@@ -16,7 +20,7 @@ const messages: Record<string, string> = {
   invalid_code: 'Der Code ist ungültig oder wurde schon benutzt.',
   login_expired: 'Anmeldung abgelaufen – bitte erneut einloggen.',
   rate_limited: 'Zu viele Versuche. Bitte kurz warten.',
-  reauth_required: 'Bitte mit 2FA-Code bestätigen.',
+  reauth_required: 'Bitte die Aktion erneut bestätigen.',
   owner_required: 'Nur Owner dürfen das.',
   csrf_check_failed: 'Sicherheitsprüfung fehlgeschlagen – Seite neu laden.',
   access_required: 'Cloudflare Access verweigert den Zugriff.',
@@ -55,6 +59,12 @@ const messages: Record<string, string> = {
   invalid_spotify_reference: 'Kein gültiger Spotify-Link.',
   already_bootstrapped: 'Es gibt bereits einen Owner.',
   invalid_bootstrap_token: 'Bootstrap-Token falsch.',
+  passkey_failed: 'Passkey konnte nicht bestätigt werden.',
+  passkey_exists: 'Dieser Passkey ist bereits eingerichtet.',
+  challenge_expired: 'Passkey-Anfrage abgelaufen – bitte erneut versuchen.',
+  passkeys_unavailable: 'Passkeys sind für diese Adresse nicht eingerichtet.',
+  last_credential: 'Der letzte Passkey eines Kontos ohne Passwort kann nicht gelöscht werden.',
+  no_passkey: 'Für dieses Konto ist kein Passkey eingerichtet.',
 };
 
 export function errorMessage(error: unknown): string {
@@ -122,58 +132,86 @@ export function AdminProvider({
   return (
     <AdminContext.Provider value={{ me, reloadMe, notify, run }}>
       {children}
-      {reauth ? <ReauthDialog onDone={(ok) => reauth.resolve(ok)} /> : null}
+      {reauth ? <ReauthDialog me={me} onDone={(ok) => reauth.resolve(ok)} /> : null}
     </AdminContext.Provider>
   );
 }
 
-function ReauthDialog({ onDone }: { onDone: (ok: boolean) => void }) {
+function ReauthDialog({ me, onDone }: { me: Me; onDone: (ok: boolean) => void }) {
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<'code' | 'passkey' | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const passkey = me.passkeyCount > 0 && passkeysSupported();
   useEffect(() => input.current?.focus(), []);
-  async function submit() {
-    setBusy(true);
+
+  async function confirmWith(kind: 'code' | 'passkey', action: () => Promise<boolean>) {
+    setBusy(kind);
+    setError(null);
     try {
-      await api.post('/api/admin/auth/reauth', { code });
-      onDone(true);
+      if (await action()) onDone(true);
     } catch (e) {
       setError(errorMessage(e));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
+
   return (
     <Modal title="Aktion bestätigen" onClose={() => onDone(false)}>
       <form
         className="flex flex-col gap-4"
         onSubmit={(e) => {
           e.preventDefault();
-          void submit();
+          void confirmWith('code', () => api.post('/api/admin/auth/reauth', { code }).then(() => true));
         }}
       >
         <p className="text-sm text-muted">
-          Für sicherheitskritische Aktionen bitte den aktuellen Code aus der Authenticator-App eingeben.
+          {passkey
+            ? 'Sicherheitskritische Aktionen bitte mit deinem Passkey (Face ID, Touch ID, Windows Hello) bestätigen.'
+            : 'Für sicherheitskritische Aktionen bitte den aktuellen Code aus der Authenticator-App eingeben.'}
         </p>
-        <Field label="2FA-Code">
-          <Input
-            ref={input}
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={6}
-            value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-          />
-        </Field>
+        {passkey ? (
+          <Button
+            size="lg"
+            busy={busy === 'passkey'}
+            disabled={busy !== null}
+            onClick={() =>
+              void confirmWith('passkey', () =>
+                signInWithPasskey('/api/admin/auth/reauth/passkey/options', '/api/admin/auth/reauth/passkey'),
+              )
+            }
+          >
+            Mit Passkey bestätigen
+          </Button>
+        ) : null}
+        {me.hasTotp ? (
+          <Field label="2FA-Code">
+            <Input
+              ref={passkey ? undefined : input}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+            />
+          </Field>
+        ) : null}
         {error ? <Notice tone="danger">{error}</Notice> : null}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => onDone(false)}>
             Abbrechen
           </Button>
-          <Button type="submit" busy={busy} disabled={code.length !== 6}>
-            Bestätigen
-          </Button>
+          {me.hasTotp ? (
+            <Button
+              type="submit"
+              variant={passkey ? 'outline' : 'primary'}
+              busy={busy === 'code'}
+              disabled={code.length !== 6 || busy !== null}
+            >
+              Bestätigen
+            </Button>
+          ) : null}
         </div>
       </form>
     </Modal>

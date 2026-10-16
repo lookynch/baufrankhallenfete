@@ -6,6 +6,7 @@ import { fail, sameOrigin, type AppEnv } from './http.ts';
 import { securityHeaders } from './security/headers.ts';
 import { adminGuard, authRoutes, requireAdmin } from './routes/admin/auth.ts';
 import { musicRoutes } from './routes/admin/music.ts';
+import { accountRoutes, passkeyAuthRoutes } from './routes/admin/passkeys.ts';
 import { ownerRoutes, systemRoutes } from './routes/admin/system.ts';
 import { buzzerRoutes } from './routes/buzzer.ts';
 import { coverRoutes } from './routes/cover.ts';
@@ -66,7 +67,9 @@ export function createApp(options: AppOptions = {}) {
   const admin = new Hono<AppEnv>();
   admin.use('*', adminGuard);
   admin.route('/auth', authRoutes);
+  admin.route('/auth', passkeyAuthRoutes);
   admin.use('*', requireAdmin);
+  admin.route('/', accountRoutes);
   admin.route('/', musicRoutes);
   admin.route('/', systemRoutes);
   admin.route('/', ownerRoutes);

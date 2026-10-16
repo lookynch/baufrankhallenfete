@@ -44,7 +44,9 @@ Für beide Einträge gilt: Verantwortlicher ist der Betreiber (`legal.controller
 - **Zwecke:** Zugriffsschutz und IT-Sicherheit des Adminbereichs, Nachvollziehbarkeit von Änderungen, Musiksteuerung über den Spotify-Party-Account, Buchung des Getränkeverbrauchs. Keine Leistungs- oder Verhaltenskontrolle.
 - **Betroffene:** Admin-Helfer und eingeladene Personen, Inhaber des Spotify-Party-Accounts.
 - **Daten:**
-  - `admin_users`: Benutzername, Anzeigename, Rolle, Passwort-Hash (PBKDF2), TOTP-Schlüssel verschlüsselt, letzte Anmeldung, aktiv oder deaktiviert.
+  - `admin_users`: Benutzername, Anzeigename, Rolle, Passwort-Hash (PBKDF2), TOTP-Schlüssel verschlüsselt (bei reinen Passkey-Konten leer), zufällige WebAuthn-Benutzerkennung, letzte Anmeldung, aktiv oder deaktiviert.
+  - `admin_passkeys`: Credential-ID, öffentlicher Schlüssel, Signaturzähler, Transports, Name, Zeitpunkt von Einrichtung und letzter Nutzung. Keine biometrischen Daten, kein privater Schlüssel. Löschung durch den Admin unter „Mein Konto“, beim Reset und per `ON DELETE CASCADE` mit dem Konto.
+  - `webauthn_challenges`: Hash der einmaligen Anmelde-Challenge, Zweck, Bezug (Einladung, Konto oder Sitzung), Ablauf nach 5 Minuten; wird beim Einlösen gelöscht, Reste im täglichen Löschlauf.
   - `admin_recovery_codes` als Hash, `admin_invites` mit Benutzername, Anzeigename, Rolle und Ablauf.
   - `admin_sessions`: Hash des Sitzungs-Tokens und Zeitstempel, ohne IP-Adresse und User-Agent. Cookie `__Host-admin`.
   - `audit_log`: Zeitpunkt, Konto, Aktion, Werte vorher und nachher; bei Anmeldung, Fehlversuch und erneuter Bestätigung der Netz-Schlüssel.
@@ -67,7 +69,8 @@ Für beide Einträge gilt: Verantwortlicher ist der Betreiber (`legal.controller
 
 - Persönliche Konten, Einladung per Einmal-Link (24 h), Rollen `owner` und `admin`.
 - Passwort mit PBKDF2-SHA-256 und geheimem Pepper, Pflicht-TOTP mit AES-GCM-verschlüsseltem Schlüssel (`ENC_KEY`), Wiederherstellungscodes nur als Hash.
-- Erneute 2FA-Bestätigung für kritische Aktionen.
+- Alternativ Passkeys (WebAuthn, Nutzerverifikation Pflicht, Attestation `none`), an `WEBAUTHN_ORIGIN` gebunden, Challenges serverseitig und einmalig.
+- Erneute Bestätigung per Passkey oder 2FA-Code für kritische Aktionen.
 - Anmelde-Limits je 15 min: 30 Versuche pro IP (IPv6: /64), 60 pro IPv6-/48-Netz, 5 pro Benutzer und IP, 6 Code-Eingaben pro Konto.
 - Optional Cloudflare Access vor `/admin` und `/api/admin`.
 

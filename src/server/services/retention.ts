@@ -20,6 +20,7 @@ export function retentionStatements(now: string, purgeGuests: boolean): string[]
     `UPDATE audit_log SET after_json = json_remove(after_json, '$.ipKeyPrefix') WHERE action = 'votes_invalidate' AND at <= ${guest} AND json_extract(after_json, '$.ipKeyPrefix') IS NOT NULL`,
     `DELETE FROM audit_log WHERE at <= ${now} - ${auditDays * DAY}`,
     `DELETE FROM admin_sessions WHERE expires_at <= ${now} OR last_seen_at <= ${now} - ${SESSION_IDLE_MS}`,
+    `DELETE FROM webauthn_challenges WHERE expires_at <= ${now}`,
     `DELETE FROM admin_invites WHERE expires_at <= ${now} - ${adminDays * DAY}`,
     `DELETE FROM admin_users WHERE disabled = 1 AND COALESCE(last_login_at, created_at) <= ${now} - ${adminDays * DAY}`,
     `INSERT INTO kv (key, value, updated_at) VALUES ('retention_run', 'true', ${now}) ON CONFLICT (key) DO UPDATE SET updated_at = excluded.updated_at`,

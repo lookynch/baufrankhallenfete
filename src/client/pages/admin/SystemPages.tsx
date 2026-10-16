@@ -490,6 +490,8 @@ interface AdminUserRow {
   disabled: number;
   last_login_at: number | null;
   sessions: number;
+  has_password: number;
+  passkeys: number;
 }
 
 interface InviteRow {
@@ -511,6 +513,12 @@ function inviteStatus(invite: InviteRow, now: number): string | null {
   if (invite.revoked) return 'widerrufen';
   if (invite.expires_at <= now) return 'abgelaufen';
   return null;
+}
+
+function loginMethod(user: AdminUserRow): string {
+  const passkeys = user.passkeys === 1 ? '1 Passkey' : `${user.passkeys} Passkeys`;
+  if (!user.has_password) return passkeys;
+  return user.passkeys ? `Passwort + 2FA, ${passkeys}` : 'Passwort + 2FA';
 }
 
 export function UsersPage() {
@@ -548,7 +556,7 @@ export function UsersPage() {
         existing.role !== form.role
           ? `\nRolle ändert sich: ${roleLabel[existing.role]} → ${roleLabel[form.role]}.`
           : '';
-      const question = `Zugang „${existing.username}“ zurücksetzen?\nBeim Einlösen werden Passwort und 2FA ersetzt und alle Sitzungen beendet.${roleChange}`;
+      const question = `Zugang „${existing.username}“ zurücksetzen?\nBeim Einlösen werden Passkeys, Passwort und 2FA ersetzt und alle Sitzungen beendet.${roleChange}`;
       if (!confirm(question)) return;
     }
     const reset = Boolean(existing);
@@ -587,7 +595,7 @@ export function UsersPage() {
     <div className="flex flex-col gap-6">
       <PageTitle
         title="Admins"
-        subtitle={`Jeder Admin hat einen eigenen Zugang mit Passwort und 2FA. Einladungen gelten 24 Stunden. Gesperrte Konten werden ${legal.retention.adminDays} Tage nach der letzten Anmeldung automatisch gelöscht; liegt diese schon länger zurück, beim nächsten täglichen Löschlauf.`}
+        subtitle={`Jeder Admin hat einen eigenen Zugang – per Passkey oder mit Passwort und 2FA. Einladungen gelten 24 Stunden. Gesperrte Konten werden ${legal.retention.adminDays} Tage nach der letzten Anmeldung automatisch gelöscht; liegt diese schon länger zurück, beim nächsten täglichen Löschlauf.`}
       />
       <div className="grid gap-6 lg:grid-cols-[24rem_1fr]">
         <Card title={existing ? 'Zugang zurücksetzen' : 'Admin einladen'}>
@@ -603,7 +611,7 @@ export function UsersPage() {
             >
               <Field
                 label="Benutzername"
-                hint="Für einen Passwort-/2FA-Reset denselben Benutzernamen eingeben und bestätigen."
+                hint="Für einen Reset (z. B. verlorener Passkey) denselben Benutzernamen eingeben und bestätigen."
               >
                 <Input
                   value={form.username}
@@ -616,7 +624,7 @@ export function UsersPage() {
                 <Notice tone={existing.disabled ? 'danger' : 'warning'}>
                   {existing.disabled
                     ? `„${existing.username}“ ist gesperrt. Erst entsperren, dann den Zugang zurücksetzen.`
-                    : `„${existing.username}“ existiert bereits (${roleLabel[existing.role]}). Der Link setzt Passwort und 2FA dieses Zugangs zurück und beendet beim Einlösen alle Sitzungen.`}
+                    : `„${existing.username}“ existiert bereits (${roleLabel[existing.role]}). Der Link setzt Passkeys, Passwort und 2FA dieses Zugangs zurück und beendet beim Einlösen alle Sitzungen.`}
                 </Notice>
               ) : null}
               <Field label="Anzeigename">
@@ -688,7 +696,7 @@ export function UsersPage() {
                       {u.display_name} <span className="font-mono text-sm text-muted">{u.username}</span>
                     </div>
                     <div className="text-sm text-muted">
-                      {roleLabel[u.role]} · {u.sessions} Sitzungen · Login{' '}
+                      {roleLabel[u.role]} · {loginMethod(u)} · {u.sessions} Sitzungen · Login{' '}
                       {u.last_login_at ? formatDateTime(u.last_login_at) : 'nie'}
                     </div>
                   </div>

@@ -23,6 +23,7 @@ describe('Rechtstexte', () => {
       expect(text).toContain(value);
     }
     expect(JSON.stringify(imprint[lang])).toContain(legal.controller.street);
+    expect(text).toMatch(/Passkeys.*(öffentlicher Schlüssel|public key)/);
   });
 
   it('DE und EN sind gleich gegliedert', () => {

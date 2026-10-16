@@ -16,6 +16,7 @@ export interface Env {
   CF_ANALYTICS_TOKEN?: string;
   CF_ACCOUNT_ID?: string;
   PBKDF2_ITERATIONS?: string;
+  WEBAUTHN_ORIGIN?: string;
 }
 
 export interface Runtime {

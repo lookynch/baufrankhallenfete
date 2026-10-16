@@ -34,12 +34,13 @@ import {
 } from '../../security/session.ts';
 import { base32Encode, generateTotpSecret, otpauthUri, verifyTotp } from '../../security/totp.ts';
 import { verifyAccessJwt } from '../../security/access.ts';
+import type { NewPasskey } from '../../security/webauthn.ts';
 import { audit, auditStatement } from '../../services/audit.ts';
 
 export const INVITE_TTL_MS = 24 * 3_600_000;
 const LOGIN_TICKET_MS = 5 * 60_000;
 const TOTP_WINDOW_SECONDS = 900;
-const ISSUER = 'Baufrankhallen-Fete';
+export const ISSUER = 'Baufrankhallen-Fete';
 
 export const authRoutes = new Hono<AppEnv>();
 
@@ -51,7 +52,16 @@ interface UserRow {
   password_hash: string;
   totp_secret_enc: string;
   totp_last_step: number;
+  webauthn_user_id: string | null;
   disabled: number;
+}
+
+export function hasPassword(user: { password_hash: string }): boolean {
+  return user.password_hash !== '';
+}
+
+function hasTotp(user: { totp_secret_enc: string }): boolean {
+  return user.totp_secret_enc !== '';
 }
 
 export const adminGuard: MiddlewareHandler<AppEnv> = async (c, next) => {
@@ -88,7 +98,7 @@ export function requireReauth(c: AppContext): void {
   if (!hasRecentReauth(c.var.admin, c.var.rt.now())) fail(403, 'reauth_required');
 }
 
-async function rateLimit(
+export async function rateLimit(
   c: AppContext,
   key: string,
   max: number,
@@ -155,7 +165,9 @@ export function assertInviteApplicable(target: InviteTarget | null, role: 'owner
   if (target.role === 'owner' && role === 'admin' && target.other_owners === 0) fail(409, 'last_owner');
 }
 
-async function loadInvite(db: D1Database, token: string, now: number) {
+export type Invite = Awaited<ReturnType<typeof loadInvite>>;
+
+export async function loadInvite(db: D1Database, token: string, now: number) {
   const invite = await db
     .prepare(
       'SELECT token_hash, username, display_name, role, created_at, expires_at, used_at FROM admin_invites WHERE token_hash = ?1',
@@ -190,7 +202,7 @@ function newRecoveryCode(): string {
   return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
 }
 
-async function issueSession(c: AppContext, userId: number): Promise<void> {
+export async function issueSession(c: AppContext, userId: number): Promise<void> {
   const token = await createSession(c.env.DB, userId, c.var.rt.now());
   setCookie(c, ADMIN_COOKIE, token, {
     path: '/',
@@ -283,51 +295,114 @@ authRoutes.post('/invite/complete', async (c) => {
   const secret = await decrypt(c.env.ENC_KEY, setup.s);
   const step = await verifyTotp(secret, input.code, now, 0);
   if (step === null) fail(422, 'invalid_code');
-  const db = c.env.DB;
-  assertInviteApplicable(await inviteTarget(db, invite.username), invite.role);
-
-  const passwordHash = await hashPassword(
-    input.password,
-    c.env.SESSION_PEPPER,
-    iterationsFrom(c.env.PBKDF2_ITERATIONS),
-  );
-  const secretEnc = await encrypt(c.env.ENC_KEY, secret);
-  const claimed = await db
-    .prepare('UPDATE admin_invites SET used_at = ?2 WHERE token_hash = ?1 AND used_at IS NULL AND expires_at > ?2')
-    .bind(invite.token_hash, now)
-    .run();
-  if (claimed.meta.changes !== 1) fail(409, 'invite_used');
-  const user = await db
-    .prepare(
-      `INSERT INTO admin_users (username, display_name, role, password_hash, totp_secret_enc, totp_last_step, created_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-       ON CONFLICT (username) DO UPDATE SET display_name = excluded.display_name, role = excluded.role,
-         password_hash = excluded.password_hash, totp_secret_enc = excluded.totp_secret_enc,
-         totp_last_step = excluded.totp_last_step
-       WHERE admin_users.disabled = 0
-         AND (excluded.role = 'owner' OR admin_users.role = 'admin'
-           OR EXISTS (SELECT 1 FROM admin_users o WHERE o.role = 'owner' AND o.disabled = 0 AND o.id <> admin_users.id))
-       RETURNING id`,
-    )
-    .bind(invite.username, invite.display_name, invite.role, passwordHash, secretEnc, step, now)
-    .first<{ id: number }>();
-  if (!user) {
-    assertInviteApplicable(await inviteTarget(db, invite.username), invite.role);
-    fail(500, 'user_not_created');
-  }
+  assertInviteApplicable(await inviteTarget(c.env.DB, invite.username), invite.role);
   const codes = Array.from({ length: 10 }, newRecoveryCode);
-  const hashes = await Promise.all(codes.map((code) => recoveryHash(c.env.SESSION_PEPPER, code)));
-  await db.batch([
-    db.prepare('DELETE FROM admin_sessions WHERE user_id = ?1').bind(user.id),
-    db.prepare('DELETE FROM admin_recovery_codes WHERE user_id = ?1').bind(user.id),
-    ...hashes.map((h) =>
-      db.prepare('INSERT INTO admin_recovery_codes (user_id, code_hash) VALUES (?1, ?2)').bind(user.id, h),
-    ),
-    auditStatement(db, now, { userId: user.id, action: 'invite_completed', entity: 'admin_user', entityId: user.id }),
-  ]);
-  await issueSession(c, user.id);
+  await finishInvite(c, invite, {
+    passwordHash: await hashPassword(input.password, c.env.SESSION_PEPPER, iterationsFrom(c.env.PBKDF2_ITERATIONS)),
+    totpSecretEnc: await encrypt(c.env.ENC_KEY, secret),
+    totpStep: step,
+    webauthnUserId: null,
+    recoveryCodeHashes: await Promise.all(codes.map((code) => recoveryHash(c.env.SESSION_PEPPER, code))),
+    passkey: null,
+  });
   return c.json({ recoveryCodes: codes });
 });
+
+export interface InviteAccess {
+  passwordHash: string;
+  totpSecretEnc: string;
+  totpStep: number;
+  webauthnUserId: string | null;
+  recoveryCodeHashes: string[];
+  passkey: (NewPasskey & { name: string }) | null;
+}
+
+export async function finishInvite(c: AppContext, invite: Invite, access: InviteAccess): Promise<void> {
+  const now = c.var.rt.now();
+  const db = c.env.DB;
+  const claimed = 'EXISTS (SELECT 1 FROM admin_invites WHERE token_hash = ?1 AND used_at = ?2)';
+  const userId = '(SELECT id FROM admin_users WHERE username = ?3)';
+  const [, claim] = await db.batch([
+    db
+      .prepare(
+        `INSERT INTO admin_users
+           (username, display_name, role, password_hash, totp_secret_enc, totp_last_step, webauthn_user_id, created_at)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
+         WHERE EXISTS (SELECT 1 FROM admin_invites WHERE token_hash = ?9 AND used_at IS NULL AND expires_at > ?8)
+         ON CONFLICT (username) DO UPDATE SET display_name = excluded.display_name, role = excluded.role,
+           password_hash = excluded.password_hash, totp_secret_enc = excluded.totp_secret_enc,
+           totp_last_step = excluded.totp_last_step,
+           webauthn_user_id = COALESCE(excluded.webauthn_user_id, admin_users.webauthn_user_id)
+         WHERE admin_users.disabled = 0
+           AND (excluded.role = 'owner' OR admin_users.role = 'admin'
+             OR EXISTS (SELECT 1 FROM admin_users o WHERE o.role = 'owner' AND o.disabled = 0 AND o.id <> admin_users.id))`,
+      )
+      .bind(
+        invite.username,
+        invite.display_name,
+        invite.role,
+        access.passwordHash,
+        access.totpSecretEnc,
+        access.totpStep,
+        access.webauthnUserId,
+        now,
+        invite.token_hash,
+      ),
+    db
+      .prepare(
+        `UPDATE admin_invites SET used_at = ?2
+         WHERE token_hash = ?1 AND used_at IS NULL AND expires_at > ?2
+           AND EXISTS (SELECT 1 FROM admin_users WHERE username = ?3 AND role = ?4 AND disabled = 0
+             AND password_hash = ?5 AND totp_secret_enc = ?6)`,
+      )
+      .bind(invite.token_hash, now, invite.username, invite.role, access.passwordHash, access.totpSecretEnc),
+    ...['admin_sessions', 'admin_recovery_codes', 'admin_passkeys'].map((table) =>
+      db
+        .prepare(`DELETE FROM ${table} WHERE user_id = ${userId} AND ${claimed}`)
+        .bind(invite.token_hash, now, invite.username),
+    ),
+    ...access.recoveryCodeHashes.map((hash) =>
+      db
+        .prepare(`INSERT INTO admin_recovery_codes (user_id, code_hash) SELECT ${userId}, ?4 WHERE ${claimed}`)
+        .bind(invite.token_hash, now, invite.username, hash),
+    ),
+    ...(access.passkey
+      ? [
+          db
+            .prepare(
+              `INSERT INTO admin_passkeys (credential_id, user_id, public_key, sign_count, transports, name, created_at)
+               SELECT ?4, ${userId}, ?5, ?6, ?7, ?8, ?2 WHERE ${claimed}`,
+            )
+            .bind(
+              invite.token_hash,
+              now,
+              invite.username,
+              access.passkey.credentialId,
+              access.passkey.publicKey,
+              access.passkey.signCount,
+              JSON.stringify(access.passkey.transports),
+              access.passkey.name,
+            ),
+        ]
+      : []),
+  ]);
+  if (claim?.meta.changes !== 1) {
+    assertInviteApplicable(await inviteTarget(db, invite.username), invite.role);
+    fail(409, 'invite_used');
+  }
+  const user = await db
+    .prepare('SELECT id FROM admin_users WHERE username = ?1')
+    .bind(invite.username)
+    .first<{ id: number }>();
+  if (!user) fail(500, 'user_not_created');
+  await audit(db, now, {
+    userId: user.id,
+    action: access.passkey ? 'invite_completed_passkey' : 'invite_completed',
+    entity: 'admin_user',
+    entityId: user.id,
+  });
+  await issueSession(c, user.id);
+}
 
 authRoutes.post('/login', async (c) => {
   const now = c.var.rt.now();
@@ -340,7 +415,7 @@ authRoutes.post('/login', async (c) => {
   const user = await c.env.DB.prepare('SELECT * FROM admin_users WHERE username = ?1 AND disabled = 0')
     .bind(input.username)
     .first<UserRow>();
-  if (!user) {
+  if (!user || !hasPassword(user)) {
     await dummyPasswordWork(c.env.SESSION_PEPPER, iterations);
     fail(401, 'invalid_credentials');
   }
@@ -375,7 +450,7 @@ async function verifySecondFactor(
 ) {
   const now = c.var.rt.now();
   const db = c.env.DB;
-  if (code) {
+  if (code && hasTotp(user)) {
     const secret = await decrypt(c.env.ENC_KEY, user.totp_secret_enc);
     const step = await verifyTotp(secret, code, now, user.totp_last_step);
     if (step === null) return false;
@@ -453,18 +528,24 @@ authRoutes.post('/logout', requireAdmin, async (c) => {
 
 authRoutes.get('/me', requireAdmin, async (c) => {
   const admin = c.var.admin;
-  const recovery = await c.env.DB.prepare(
-    'SELECT COUNT(*) AS n FROM admin_recovery_codes WHERE user_id = ?1 AND used_at IS NULL',
+  const access = await c.env.DB.prepare(
+    `SELECT password_hash <> '' AS has_password, totp_secret_enc <> '' AS has_totp,
+            (SELECT COUNT(*) FROM admin_recovery_codes WHERE user_id = ?1 AND used_at IS NULL) AS recovery_codes,
+            (SELECT COUNT(*) FROM admin_passkeys WHERE user_id = ?1) AS passkeys
+     FROM admin_users WHERE id = ?1`,
   )
     .bind(admin.userId)
-    .first<{ n: number }>();
+    .first<{ has_password: number; has_totp: number; recovery_codes: number; passkeys: number }>();
   return c.json({
     id: admin.userId,
     username: admin.username,
     displayName: admin.displayName,
     role: admin.role,
     reauthValid: hasRecentReauth(admin, c.var.rt.now()),
-    recoveryCodesLeft: recovery?.n ?? 0,
+    recoveryCodesLeft: access?.recovery_codes ?? 0,
+    hasPassword: access?.has_password === 1,
+    hasTotp: access?.has_totp === 1,
+    passkeyCount: access?.passkeys ?? 0,
   });
 });
 

@@ -67,6 +67,10 @@ export function rgb(color: Rgb, alpha = 1): string {
   return alpha === 1 ? `rgb(${color.join(' ')})` : `rgb(${color.join(' ')} / ${alpha})`;
 }
 
+export function hex(color: Rgb): string {
+  return `#${color.map((channel) => channel.toString(16).padStart(2, '0')).join('')}`;
+}
+
 export function cssVariables(): Record<string, string> {
   const vars: Record<string, string> = {};
   for (const [name, value] of Object.entries(theme.colors)) vars[`--t-${kebab(name)}`] = value.join(' ');

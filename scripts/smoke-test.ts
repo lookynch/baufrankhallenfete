@@ -38,7 +38,19 @@ const retentionRuns = [1, 2].map(() => d1('execute', 'fete', '--command', RETENT
 
 const server = spawn(
   wrangler,
-  ['pages', 'dev', 'dist', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', persist],
+  [
+    'pages',
+    'dev',
+    'dist',
+    '--port',
+    String(port),
+    '--ip',
+    '127.0.0.1',
+    '--persist-to',
+    persist,
+    '--binding',
+    `WEBAUTHN_ORIGIN=http://localhost:${port}`,
+  ],
   {
     cwd: root,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -71,7 +83,7 @@ const checks: Array<[string, () => Promise<boolean>]> = [
   ['Löschfristen-SQL läuft zweimal gegen lokale D1', async () => retentionRuns.every((status) => status === 0)],
   [
     'Health liefert Schema-Version',
-    async () => ((await (await fetch(`${base}/api/health`)).json()) as { schemaVersion: number }).schemaVersion === 3,
+    async () => ((await (await fetch(`${base}/api/health`)).json()) as { schemaVersion: number }).schemaVersion === 4,
   ],
   [
     'Startseite mit CSP aus _headers, ohne Fremdhosts',
@@ -89,6 +101,28 @@ const checks: Array<[string, () => Promise<boolean>]> = [
   ['Cover-Proxy mit ungültiger ID → 404', async () => (await fetch(`${base}/api/cover/abc`)).status === 404],
   ['Display ohne Kopplung → 401', async () => (await fetch(`${base}/api/display/state`)).status === 401],
   ['Admin ohne Login → 401', async () => (await fetch(`${base}/api/admin/auth/me`)).status === 401],
+  [
+    'Web-App-Manifeste für Gast und Admin',
+    async () => {
+      const ids = await Promise.all(
+        ['guest', 'admin'].map(
+          async (app) => ((await (await fetch(`${base}/pwa/${app}.webmanifest`)).json()) as { id: string }).id,
+        ),
+      );
+      return ids.join(' ') === '/ /admin/';
+    },
+  ],
+  [
+    'Passkey-Optionen aus der Workers-Runtime',
+    async () => {
+      const res = await fetch(`${base}/api/admin/auth/passkey/options`, {
+        method: 'POST',
+        body: '{}',
+        headers: { Origin: base, 'X-Requested-With': 'fete', 'Content-Type': 'application/json' },
+      });
+      return res.ok && ((await res.json()) as { rpId: string }).rpId === 'localhost';
+    },
+  ],
   [
     'Gast-POST ohne Origin → 403',
     async () =>

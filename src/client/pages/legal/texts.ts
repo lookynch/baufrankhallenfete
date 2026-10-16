@@ -334,6 +334,10 @@ const privacyDe: LegalDocument = {
               'Benutzername, Anzeigename, Rolle, Passwort nur als Hash (PBKDF2), Zwei-Faktor-Schlüssel verschlüsselt, Wiederherstellungscodes nur als Hash, Zeitpunkt der letzten Anmeldung und ob das Konto aktiv ist. Für Einladungen: Benutzername, Anzeigename, Rolle und Ablaufzeit.',
             ],
             [
+              'Passkeys',
+              'Wenn du dich per Passkey anmeldest: Kennung und öffentlicher Schlüssel des Passkeys, ein Signaturzähler, die vom Gerät gemeldeten Übertragungswege, ein Name sowie Zeitpunkt der Einrichtung und letzten Nutzung, dazu eine zufällige Konto-Kennung für dein Gerät. Fingerabdruck, Gesichtsdaten und der private Schlüssel verlassen dein Gerät nie. Anmelde-Anfragen (Challenges) löschen wir nach höchstens 5 Minuten. Passkeys löschst du selbst unter „Mein Konto“; mit dem Konto werden sie automatisch gelöscht.',
+            ],
+            [
               'Sitzungen',
               'Cookie `__Host-admin` mit einem Zufallswert. Gespeichert werden nur dessen Hash und Zeitstempel, weder IP-Adresse noch Browser.',
             ],
@@ -343,7 +347,7 @@ const privacyDe: LegalDocument = {
             ],
             [
               'Anmeldeschutz',
-              'Anmeldeversuche zählen wir je Netz-Schlüssel und je Hash aus Benutzername und Netz-Schlüssel, Code-Eingaben je Konto. Den Benutzernamen speichern wir dabei nie im Klartext.',
+              'Anmeldeversuche zählen wir je Netz-Schlüssel und je Hash aus Benutzername und Netz-Schlüssel, Code- und Passkey-Bestätigungen je Konto. Den Benutzernamen speichern wir dabei nie im Klartext.',
             ],
             [
               'Spotify',
@@ -367,7 +371,7 @@ const privacyDe: LegalDocument = {
             ],
             [
               'Bereitstellung',
-              'Die Mithilfe im Adminbereich ist freiwillig. Ohne Konto mit Passwort und Zwei-Faktor-Code ist kein Zugang zum Adminbereich möglich.',
+              'Die Mithilfe im Adminbereich ist freiwillig. Ohne Konto mit Passkey oder mit Passwort und Zwei-Faktor-Code ist kein Zugang zum Adminbereich möglich.',
             ],
             [
               'Empfänger',
@@ -674,6 +678,10 @@ const privacyEn: LegalDocument = {
               'User name, display name, role, password only as a hash (PBKDF2), two-factor key encrypted, recovery codes only as hashes, time of last login and whether the account is active. For invitations: user name, display name, role and expiry time.',
             ],
             [
+              'Passkeys',
+              'If you sign in with a passkey: the passkey ID and public key, a signature counter, the transports reported by the device, a name and the time of setup and last use, plus a random account ID for your device. Fingerprints, face data and the private key never leave your device. Sign-in requests (challenges) are deleted after at most 5 minutes. You delete passkeys yourself under “Mein Konto”; they are deleted automatically together with the account.',
+            ],
+            [
               'Sessions',
               'Cookie `__Host-admin` with a random value. Only its hash and timestamps are stored, neither IP address nor browser.',
             ],
@@ -683,7 +691,7 @@ const privacyEn: LegalDocument = {
             ],
             [
               'Login protection',
-              'We count login attempts per network key and per hash of user name and network key, and code entries per account. The user name is never stored in plain text.',
+              'We count login attempts per network key and per hash of user name and network key, and code and passkey confirmations per account. The user name is never stored in plain text.',
             ],
             [
               'Spotify',
@@ -707,7 +715,7 @@ const privacyEn: LegalDocument = {
             ],
             [
               'Provision',
-              'Helping in the admin area is voluntary. Without an account with password and two-factor code there is no access to the admin area.',
+              'Helping in the admin area is voluntary. Without an account with a passkey or with password and two-factor code there is no access to the admin area.',
             ],
             [
               'Recipients',

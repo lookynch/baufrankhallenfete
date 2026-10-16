@@ -63,13 +63,14 @@ jobs:
           CF_ANALYTICS_TOKEN: ${{ secrets.CF_ANALYTICS_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           PBKDF2_ITERATIONS: ${{ vars.PBKDF2_ITERATIONS }}
+          WEBAUTHN_ORIGIN: ${{ vars.PRODUCTION_URL || format('https://{0}.pages.dev', vars.PAGES_PROJECT || 'baufrankhallenfete') }}
         run: |
           for required in SESSION_PEPPER COOKIE_SECRET QR_SECRET IP_HASH_SECRET BUZZER_HMAC_SECRET ENC_KEY; do
             test -n "${!required}" || { echo "::error::Secret $required fehlt"; exit 1; }
           done
           file="$(mktemp)"
           trap 'rm -f "$file"' EXIT
-          jq -n 'env | with_entries(select(.key | IN("SESSION_PEPPER","COOKIE_SECRET","QR_SECRET","IP_HASH_SECRET","BUZZER_HMAC_SECRET","ENC_KEY","SPOTIFY_CLIENT_ID","SPOTIFY_CLIENT_SECRET","BOOTSTRAP_TOKEN","ACCESS_TEAM_DOMAIN","ACCESS_AUD","CF_ANALYTICS_TOKEN","CF_ACCOUNT_ID","PBKDF2_ITERATIONS")) | select(.value != ""))' > "$file"
+          jq -n 'env | with_entries(select(.key | IN("SESSION_PEPPER","COOKIE_SECRET","QR_SECRET","IP_HASH_SECRET","BUZZER_HMAC_SECRET","ENC_KEY","SPOTIFY_CLIENT_ID","SPOTIFY_CLIENT_SECRET","BOOTSTRAP_TOKEN","ACCESS_TEAM_DOMAIN","ACCESS_AUD","CF_ANALYTICS_TOKEN","CF_ACCOUNT_ID","PBKDF2_ITERATIONS","WEBAUTHN_ORIGIN")) | select(.value != ""))' > "$file"
           npx wrangler pages secret bulk "$file" --project-name "$PAGES_PROJECT"
           present="$(npx wrangler pages secret list --project-name "$PAGES_PROJECT")"
           for optional in SPOTIFY_CLIENT_ID SPOTIFY_CLIENT_SECRET TURNSTILE_SITE_KEY TURNSTILE_SECRET BOOTSTRAP_TOKEN ACCESS_TEAM_DOMAIN ACCESS_AUD CF_ANALYTICS_TOKEN PBKDF2_ITERATIONS; do

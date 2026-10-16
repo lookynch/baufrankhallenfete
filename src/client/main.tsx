@@ -6,6 +6,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Route, Routes } from 'react-router';
 import { I18nProvider } from './lib/i18n.tsx';
+import { applyPwaApp } from './lib/pwa.ts';
 import { applyTheme } from './lib/theme.ts';
 import { AdminApp } from './pages/admin/AdminApp.tsx';
 import { BootstrapPage, InvitePage, SpotifyCallbackPage } from './pages/admin/AuthPages.tsx';
@@ -14,6 +15,7 @@ import { GuestApp, JoinPage } from './pages/guest/GuestApp.tsx';
 import { ImprintPage, PrivacyPage } from './pages/legal/LegalPages.tsx';
 
 applyTheme();
+applyPwaApp();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
