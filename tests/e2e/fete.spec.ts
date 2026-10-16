@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { devices, expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { randomToken, sha256Hex } from '../../src/server/security/crypto.ts';
 import { totpCode } from '../../src/server/security/totp.ts';
 
 const root = join(import.meta.dirname, '..', '..');
@@ -87,6 +88,7 @@ test('kompletter Abend: Admin, Display, Gast, Buchhaltung', async ({ browser, ba
 
   await admin.goto(inviteLink!);
   await expect(admin.getByText('Admin-Zugang einrichten')).toBeVisible();
+  await admin.getByRole('button', { name: 'Stattdessen Passwort + Authenticator-App' }).click();
   await expect(admin.locator('a[href="/datenschutz#admin"]').first()).toBeVisible();
   const secret = (await admin.locator('code').innerText()).trim();
   await admin.getByLabel('Neues Passwort').fill('Grüne Gurken tanzen Samba 7');
@@ -269,4 +271,68 @@ test('Rechtsseiten: Links, Inhalte, Sprache und Anker ohne API-Aufrufe', async (
   expect(cspErrors).toEqual([]);
   const origin = new URL(baseURL!).origin;
   expect(requests.filter((url) => /^https?:/.test(url) && new URL(url).origin !== origin)).toEqual([]);
+});
+
+test('Passkey: Einladung, Anmeldung, Kontoverwaltung und Web-App-Manifeste', async ({ browser }) => {
+  const token = randomToken(32);
+  const now = Date.now();
+  sql(
+    `INSERT INTO admin_invites (token_hash, username, display_name, role, created_at, expires_at)
+     VALUES ('${await sha256Hex(token)}', 'paula', 'Paula Passkey', 'owner', ${now}, ${now + 3_600_000})`,
+  );
+  const context = await browser.newContext();
+  await watchNetwork(context);
+  const page = await context.newPage();
+  watchConsole(page);
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('WebAuthn.enable');
+  await cdp.send('WebAuthn.addVirtualAuthenticator', {
+    options: {
+      protocol: 'ctap2',
+      transport: 'internal',
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+
+  await page.goto(`/admin/invite#${token}`);
+  await page.getByRole('button', { name: 'Mit Passkey einrichten' }).click();
+  await expect(page.getByText('Zugang eingerichtet')).toBeVisible();
+  await page.screenshot({ path: join(shots, 'admin-invite-passkey.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Weiter zum Adminbereich' }).click();
+  await expect(page.getByRole('heading', { name: 'Übersicht' })).toBeVisible();
+  await expect(page.getByText('Wiederherstellungscodes!')).toHaveCount(0);
+
+  const adminManifest = await cdp.send('Page.getAppManifest');
+  expect(adminManifest.url).toMatch(/\/pwa\/admin\.webmanifest$/);
+  expect(adminManifest.errors).toEqual([]);
+  expect(JSON.parse(adminManifest.data ?? '{}')).toMatchObject({
+    id: '/admin/',
+    scope: '/admin/',
+    display: 'standalone',
+  });
+
+  await page.getByRole('link', { name: 'Mein Konto' }).click();
+  await expect(page.getByText(/Passkey vom/)).toBeVisible();
+  await page.getByRole('button', { name: 'Passkey hinzufügen' }).click();
+  await expect(page.getByText('Dieser Passkey ist bereits eingerichtet.')).toBeVisible();
+  await page.getByRole('button', { name: 'Umbenennen' }).click();
+  await page.getByLabel('Name des Passkeys').fill('Laptop');
+  await page.getByRole('button', { name: 'Speichern' }).click();
+  await expect(page.getByText('Laptop')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Löschen' })).toBeDisabled();
+
+  await page.getByRole('button', { name: 'Abmelden' }).click();
+  await page.getByRole('button', { name: 'Mit Passkey anmelden' }).click();
+  await expect(page.getByRole('heading', { name: 'Übersicht' })).toBeVisible();
+  await page.screenshot({ path: join(shots, 'admin-passkey-login.png') });
+
+  const guest = await context.newPage();
+  await guest.goto('/datenschutz');
+  const guestManifest = await (await context.newCDPSession(guest)).send('Page.getAppManifest');
+  expect(guestManifest.url).toMatch(/\/pwa\/guest\.webmanifest$/);
+  expect(JSON.parse(guestManifest.data ?? '{}')).toMatchObject({ id: '/', start_url: '/' });
+  expect(cspErrors).toEqual([]);
 });

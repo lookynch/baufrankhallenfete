@@ -13,7 +13,8 @@
 - [ ] `CF_ANALYTICS_TOKEN` gesetzt (dringend empfohlen). Ohne ihn drosselt der Budget-Wächter nicht, und Gäste sehen Cover auch über 80 % Budget.
 - [ ] Spotify-Premium des Party-Accounts läuft über das Eventdatum hinaus.
 - [ ] Spotify im Admin unter „Musik & Sets → Spotify“ **neu verbinden**: Die Freigabe gilt 6 Monate ab Verbindung.
-- [ ] Mindestens 2 Owner mit 2FA. Wiederherstellungscodes sicher abgelegt.
+- [ ] Mindestens 2 Owner mit Passkey oder 2FA. Wiederherstellungscodes sicher abgelegt, Passkey-Konten möglichst mit zwei Geräten (z. B. iPhone + Laptop).
+- [ ] Adminbereich auf den Orga-Handys als App installiert (Safari: Teilen → Zum Home-Bildschirm, Android: App installieren) und dort einmal angemeldet.
 - [ ] Buchhaltung hat Konten, Durchschnittspreis pro Kasten und Budget in den Einstellungen bestätigt.
 
 ## Generalprobe (mind. 1 Woche vorher, vor Ort)
@@ -75,13 +76,13 @@
 
 ## Notfall
 
-| Problem                            | Maßnahme                                                                                                           |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| App, Internet oder Spotify-API weg | Musik läuft über die Vorprogramm-Playlist weiter. Getränke per Strichliste, später unter „Buchhaltung“ nachbuchen. |
-| Song gehört nicht hierher          | „Voting & Queue“ → Song entfernen oder verschieben. Spotify → „Song überspringen“.                                 |
-| Falsches Stimmungslevel            | Level der nächsten Runde unter „Voting & Queue“ setzen.                                                            |
-| Admin ausgesperrt                  | Anderer Owner entsperrt unter „Audit & Sicherheit → Rate-Limits“ bzw. lädt mit Reset neu ein (Passwort und 2FA).   |
-| Display zeigt Kopplungscode        | Im Admin unter „Displays“ den Code eingeben.                                                                       |
+| Problem                            | Maßnahme                                                                                                                                                                                          |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App, Internet oder Spotify-API weg | Musik läuft über die Vorprogramm-Playlist weiter. Getränke per Strichliste, später unter „Buchhaltung“ nachbuchen.                                                                                |
+| Song gehört nicht hierher          | „Voting & Queue“ → Song entfernen oder verschieben. Spotify → „Song überspringen“.                                                                                                                |
+| Falsches Stimmungslevel            | Level der nächsten Runde unter „Voting & Queue“ setzen.                                                                                                                                           |
+| Admin ausgesperrt                  | Anderer Owner entsperrt unter „Audit & Sicherheit → Rate-Limits“ bzw. lädt mit Reset neu ein (Passkey oder Passwort und 2FA). Letzter Owner ohne Zugang: `scripts/notfall-einladung.ts` (README). |
+| Display zeigt Kopplungscode        | Im Admin unter „Displays“ den Code eingeben.                                                                                                                                                      |
 
 ## Danach
 

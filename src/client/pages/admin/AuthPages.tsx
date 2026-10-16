@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router';
 import { QrCode } from '../../components/music.tsx';
 import { Button, Card, Field, Input, Notice, Spinner } from '../../components/ui.tsx';
 import { api, ApiError } from '../../lib/api.ts';
+import { createPasskey, passkeysSupported, signInWithPasskey } from '../../lib/passkey.ts';
 import { theme } from '../../lib/theme.ts';
 import { LegalLinks } from '../legal/LegalPages.tsx';
 import { errorMessage } from './shared.tsx';
@@ -35,6 +36,20 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [useRecovery, setUseRecovery] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const offerPasskey = !ticket && passkeysSupported();
+
+  async function loginWithPasskey() {
+    setPasskeyBusy(true);
+    setError(null);
+    try {
+      if (await signInWithPasskey('/api/admin/auth/passkey/options', '/api/admin/auth/passkey/verify')) onLoggedIn();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setPasskeyBusy(false);
+    }
+  }
 
   async function login() {
     setBusy(true);
@@ -66,6 +81,14 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
 
   return (
     <AuthShell title={ticket ? 'Zwei-Faktor-Bestätigung' : 'Anmelden'}>
+      {offerPasskey ? (
+        <div className="mb-5 flex flex-col gap-3">
+          <Button size="lg" busy={passkeyBusy} onClick={() => void loginWithPasskey()}>
+            Mit Passkey anmelden
+          </Button>
+          <div className="text-center text-sm text-muted">oder mit Passwort und Authenticator-App</div>
+        </div>
+      ) : null}
       <form
         className="flex flex-col gap-4"
         onSubmit={(e) => {
@@ -112,7 +135,7 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
           </>
         )}
         {error ? <Notice tone="danger">{error}</Notice> : null}
-        <Button type="submit" size="lg" busy={busy}>
+        <Button type="submit" size="lg" variant={offerPasskey ? 'outline' : 'primary'} busy={busy}>
           {ticket ? 'Bestätigen' : 'Weiter'}
         </Button>
       </form>
@@ -144,11 +167,13 @@ export function InvitePage() {
   const navigate = useNavigate();
   const [token] = useState(readInviteToken);
   const [info, setInfo] = useState<{ username: string; displayName: string; role: string } | null>(null);
+  const [method, setMethod] = useState<'choose' | 'password'>(passkeysSupported() ? 'choose' : 'password');
   const [setup, setSetup] = useState<{ secret: string; otpauth: string; setupToken: string } | null>(null);
   const [password, setPassword] = useState('');
   const [repeat, setRepeat] = useState('');
   const [code, setCode] = useState('');
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
+  const [passkeyReady, setPasskeyReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -177,11 +202,32 @@ export function InvitePage() {
       } catch (e) {
         setError(errorMessage(e));
         if (e instanceof ApiError && e.status === 404) forgetInviteToken();
-        return;
       }
-      await startSetup();
     })();
-  }, [token, startSetup]);
+  }, [token]);
+
+  useEffect(() => {
+    if (info && method === 'password') void startSetup();
+  }, [info, method, startSetup]);
+
+  async function setUpPasskey() {
+    setBusy(true);
+    setError(null);
+    try {
+      if (
+        await createPasskey('/api/admin/auth/invite/passkey/options', '/api/admin/auth/invite/passkey/complete', {
+          token,
+        })
+      ) {
+        forgetInviteToken();
+        setPasskeyReady(true);
+      }
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function complete() {
     if (password !== repeat) return setError('Die Passwörter stimmen nicht überein.');
@@ -202,6 +248,23 @@ export function InvitePage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (passkeyReady) {
+    return (
+      <AuthShell title="Zugang eingerichtet">
+        <div className="flex flex-col gap-4 text-sm text-muted">
+          <p>Dein Passkey ist gespeichert. Ab jetzt meldest du dich mit Face ID, Touch ID oder PIN an.</p>
+          <p>
+            Weitere Geräte kannst du jederzeit unter „Mein Konto“ hinzufügen. Tipp: Über „Teilen → Zum Home-Bildschirm“
+            bzw. „App installieren“ wird der Adminbereich zur App.
+          </p>
+          <Button size="lg" onClick={() => navigate('/admin')}>
+            Weiter zum Adminbereich
+          </Button>
+        </div>
+      </AuthShell>
+    );
   }
 
   if (recoveryCodes) {
@@ -225,16 +288,59 @@ export function InvitePage() {
     );
   }
 
+  const greeting = info ? (
+    <>
+      <p className="text-sm text-muted">
+        Hallo <strong className="text-fg">{info.displayName}</strong>! Dein Benutzername ist{' '}
+        <strong className="font-mono text-fg">{info.username}</strong> ({info.role}).
+      </p>
+      <p className="text-sm text-muted">
+        Welche Daten der Adminbereich über dich speichert, steht in den{' '}
+        <a href="/datenschutz#admin" target="_blank" className="text-accent underline">
+          Datenschutzhinweisen für Admins
+        </a>
+        .
+      </p>
+    </>
+  ) : null;
+
   return (
     <AuthShell title="Admin-Zugang einrichten">
-      {!(info && setup) && !error ? <Spinner /> : null}
-      {error && !(info && setup) ? <Notice tone="danger">{error}</Notice> : null}
-      {info && !setup && error ? (
-        <Button className="mt-4 w-full" busy={busy} onClick={() => void startSetup()}>
-          2FA-Einrichtung neu starten
-        </Button>
+      {!info && !error ? <Spinner /> : null}
+      {!info && error ? <Notice tone="danger">{error}</Notice> : null}
+      {info && method === 'choose' ? (
+        <div className="flex flex-col gap-5">
+          {greeting}
+          <Button size="lg" busy={busy} onClick={() => void setUpPasskey()}>
+            Mit Passkey einrichten
+          </Button>
+          <p className="-mt-2 text-center text-xs text-muted">
+            Face ID, Touch ID, Windows Hello oder Bildschirmsperre – kein Passwort, keine App.
+          </p>
+          {error ? <Notice tone="danger">{error}</Notice> : null}
+          <button
+            type="button"
+            className="text-sm text-accent underline"
+            disabled={busy}
+            onClick={() => {
+              setError(null);
+              setMethod('password');
+            }}
+          >
+            Stattdessen Passwort + Authenticator-App
+          </button>
+        </div>
       ) : null}
-      {info && setup ? (
+      {info && method === 'password' && !setup && !error ? <Spinner /> : null}
+      {info && method === 'password' && !setup && error ? (
+        <div className="flex flex-col gap-4">
+          <Notice tone="danger">{error}</Notice>
+          <Button className="w-full" busy={busy} onClick={() => void startSetup()}>
+            2FA-Einrichtung neu starten
+          </Button>
+        </div>
+      ) : null}
+      {info && method === 'password' && setup ? (
         <form
           className="flex flex-col gap-5"
           onSubmit={(e) => {
@@ -242,17 +348,7 @@ export function InvitePage() {
             void complete();
           }}
         >
-          <p className="text-sm text-muted">
-            Hallo <strong className="text-fg">{info.displayName}</strong>! Dein Benutzername ist{' '}
-            <strong className="font-mono text-fg">{info.username}</strong> ({info.role}).
-          </p>
-          <p className="text-sm text-muted">
-            Welche Daten der Adminbereich über dich speichert, steht in den{' '}
-            <a href="/datenschutz#admin" target="_blank" className="text-accent underline">
-              Datenschutzhinweisen für Admins
-            </a>
-            .
-          </p>
+          {greeting}
           <Field label="Neues Passwort" hint="Mindestens 12 Zeichen, gerne ein Satz.">
             <Input
               type="password"

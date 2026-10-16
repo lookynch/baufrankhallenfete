@@ -10,7 +10,7 @@ export default defineConfig({
   retries: 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
-    baseURL: 'http://127.0.0.1:8799',
+    baseURL: 'http://localhost:8799',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     launchOptions: localChromium ? { executablePath: localChromium } : {},

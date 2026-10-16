@@ -85,6 +85,16 @@ async function seed(db: D1Database, now: number) {
       )
       .bind(ago(200 * DAY), ago(91 * DAY), ago(10 * DAY)),
     db.prepare("INSERT INTO admin_recovery_codes (user_id, code_hash) VALUES (1, 'r1'), (2, 'r2')"),
+    db.prepare(
+      `INSERT INTO admin_passkeys (credential_id, user_id, public_key, name, created_at) VALUES
+         ('pk-anna', 1, '{}', 'iPhone', 0), ('pk-alt', 2, '{}', 'iPhone', 0)`,
+    ),
+    db
+      .prepare(
+        `INSERT INTO webauthn_challenges (challenge_hash, purpose, expires_at) VALUES
+           ('offen', 'login', ?1), ('abgelaufen', 'login', ?2)`,
+      )
+      .bind(now + MIN, ago(MIN)),
     db
       .prepare(
         `INSERT INTO admin_sessions (token_hash, user_id, created_at, last_seen_at, expires_at, reauth_at) VALUES
@@ -144,7 +154,7 @@ describe('Tägliche Löschfristen (RETENTION_SQL)', () => {
     ]);
   });
 
-  it('löscht abgelaufene Sessions, alte Einladungen und deaktivierte Konten samt Recovery-Codes', async () => {
+  it('löscht abgelaufene Sessions, Challenges, alte Einladungen und deaktivierte Konten samt Zugängen', async () => {
     const db = await retained();
     expect(await rows(db, 'SELECT token_hash FROM admin_sessions')).toEqual([{ token_hash: 'aktiv' }]);
     expect(await rows(db, 'SELECT token_hash FROM admin_invites')).toEqual([{ token_hash: 'jung' }]);
@@ -153,6 +163,8 @@ describe('Tägliche Löschfristen (RETENTION_SQL)', () => {
       { username: 'pause' },
     ]);
     expect(await rows(db, 'SELECT user_id FROM admin_recovery_codes')).toEqual([{ user_id: 1 }]);
+    expect(await rows(db, 'SELECT credential_id FROM admin_passkeys')).toEqual([{ credential_id: 'pk-anna' }]);
+    expect(await rows(db, 'SELECT challenge_hash FROM webauthn_challenges')).toEqual([{ challenge_hash: 'offen' }]);
   });
 
   it('setzt den Laufnachweis und ist idempotent', async () => {

@@ -352,7 +352,9 @@ systemRoutes.post('/ratelimits/clear', async (c) => {
 systemRoutes.get('/users', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT u.id, u.username, u.display_name, u.role, u.disabled, u.created_at, u.last_login_at,
-            (SELECT COUNT(*) FROM admin_sessions s WHERE s.user_id = u.id) AS sessions
+            (SELECT COUNT(*) FROM admin_sessions s WHERE s.user_id = u.id) AS sessions,
+            u.password_hash <> '' AS has_password,
+            (SELECT COUNT(*) FROM admin_passkeys p WHERE p.user_id = u.id) AS passkeys
      FROM admin_users u ORDER BY u.username`,
   ).all();
   const invites = await c.env.DB.prepare(

@@ -4,6 +4,7 @@ import { Notice, Spinner, useToast } from '../../components/ui.tsx';
 import { api, ApiError } from '../../lib/api.ts';
 import { theme } from '../../lib/theme.ts';
 import { LegalLinks } from '../legal/LegalPages.tsx';
+import { AccountPage } from './AccountPage.tsx';
 import { LoginPage } from './AuthPages.tsx';
 import { Dashboard } from './Dashboard.tsx';
 import { LedgerPage } from './LedgerPage.tsx';
@@ -24,6 +25,7 @@ const nav = [
   { to: '/admin/settings', label: 'Einstellungen', icon: '⚙' },
   { to: '/admin/users', label: 'Admins', icon: '👤' },
   { to: '/admin/audit', label: 'Audit & Sicherheit', icon: '⛨' },
+  { to: '/admin/account', label: 'Mein Konto', icon: '🔑' },
 ];
 
 export function AdminApp() {
@@ -100,7 +102,7 @@ export function AdminApp() {
             <div className="px-2 text-xs text-muted">
               {me.username} · {me.role}
             </div>
-            {me.recoveryCodesLeft < 3 ? (
+            {me.hasTotp && me.recoveryCodesLeft < 3 ? (
               <div className="mt-2 px-2 text-xs text-warning">
                 Nur noch {me.recoveryCodesLeft} Wiederherstellungscodes!
               </div>
@@ -149,6 +151,7 @@ export function AdminApp() {
               <Route path="settings" element={<SettingsPage />} />
               <Route path="users" element={<UsersPage />} />
               <Route path="audit" element={<AuditPage />} />
+              <Route path="account" element={<AccountPage />} />
               <Route path="*" element={<Notice>Seite nicht gefunden.</Notice>} />
             </Routes>
           </main>

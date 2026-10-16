@@ -6,7 +6,7 @@ Party-App für die Fete in der Baufrankhalle (IT Applications & Buchhaltung). L�
 | ----------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------- |
 | Gäste (Voting, Songwünsche)                                 | QR-Code auf dem TV → `/v/<code>`             | Alle Gäste, nur QR scannen                         |
 | TV / Bar 1 Stattrack / Bar 2 Buchhaltung / Player-Taktgeber | `/display` (Rolle wird beim Koppeln gewählt) | Bildschirme                                        |
-| Adminbereich                                                | `/admin`                                     | Orga-Team, eigener Login + 2FA                     |
+| Adminbereich                                                | `/admin`                                     | Orga-Team, Passkey oder Passwort + 2FA             |
 | Buzzer                                                      | PC-Agent → `/api/buzzer/*`                   | Bar-PC, siehe [`agent/README.md`](agent/README.md) |
 
 ## So funktioniert der Abend
@@ -32,9 +32,10 @@ Restrisiko: Wer gezielt Browser oder Gerät wechselt _und_ sich neu ins Mobilfun
 ## Sicherheit Adminbereich
 
 - Eigener Account pro Admin, Einladung per Einmal-Link (24 h). Eine neue Einladung ersetzt ältere offene Einladungen desselben Benutzers. Bestehende Benutzer werden nur mit ausdrücklichem **Reset** neu eingeladen. Offene Einladungen lassen sich widerrufen, Deaktivieren widerruft sie automatisch. Deaktivierte Accounts werden durch eine Einladung nicht reaktiviert, der letzte aktive Owner kann nicht herabgestuft werden.
-- Passwort (PBKDF2 + geheimer Pepper) und **Pflicht-TOTP**, dazu 10 Wiederherstellungscodes.
+- Anmeldung per **Passkey** (Face ID, Touch ID, Windows Hello, Android-Bildschirmsperre) oder per Passwort (PBKDF2 + geheimer Pepper) mit **Pflicht-TOTP** und 10 Wiederherstellungscodes. Die Methode wählt jeder beim Einlösen der Einladung bzw. beim Bootstrap; weitere Passkeys unter „Mein Konto“. Passkeys sind an `WEBAUTHN_ORIGIN` gebunden (Deploy setzt es auf `PRODUCTION_URL` bzw. `https://<projekt>.pages.dev`), auf Preview-URLs gibt es keine Passkeys.
+- Gast- und Adminbereich sind als eigene Web-Apps installierbar (Manifeste aus `src/shared/pwa.ts`, Icons in `public/pwa/`). Icons neu erzeugen: quadratische, randlose PNGs nach `assets/pwa/guest.png` und `assets/pwa/admin.png` legen, dann `node scripts/generate-icons.ts`. Auf dem iPhone haben Homescreen-Apps eigene Cookies: Einladungen in Safari annehmen, danach in der App per Passkey anmelden; Spotify im Browser verbinden. Die Gast-App braucht nach dem QR-Scan (öffnet Safari) dort ein gültiges Cookie, auf dem iPhone ist sie deshalb nur eingeschränkt nützlich.
 - Sessions als `__Host-` Cookies mit SameSite=Strict, Idle 2 h, maximal 12 h, ohne gespeicherte IP oder Browserkennung. CSRF-Schutz über Origin-Prüfung und Pflicht-Header.
-- Kritische Aktionen (Admins verwalten, Gästedaten löschen) brauchen eine **erneute 2FA-Bestätigung**.
+- Kritische Aktionen (Admins verwalten, Passkeys verwalten, Gästedaten löschen) brauchen eine **erneute Bestätigung** per Passkey oder 2FA-Code.
 - Rollen `owner` (verwaltet Admins) und `admin`.
 - Login-Drosselung pro IP, pro IPv6-/48-Netz und pro Benutzer + IP (Benutzername nur als HMAC), damit Gäste niemanden aussperren können.
 - **Audit-Log** aller Änderungen (90 Tage).
@@ -86,7 +87,7 @@ Pro Tag sind 100.000 Function-Requests frei (Reset 00:00 UTC). Schätzung für 6
 1. Branch anlegen, ändern, Pull Request öffnen. Die **CI** prüft Audit, Lint, Format, Theme-Regel, Typen, Unit-/Integrationstests mit Coverage, Build, Migrationen auf frischer D1, Smoke-Test gegen `wrangler pages dev`, Playwright-E2E (inkl. CSP-Verstößen) und den PC-Agenten.
 2. Nach Review in `main` mergen. **`deploy.yml`** führt die CI erneut aus, wendet D1-Migrationen an, synchronisiert die Secrets, deployt und macht einen Health-Check auf Produktion.
 
-Migrationen nur **additiv** schreiben (neue Datei `migrations/000N_*.sql`). Der laufende Code muss mit dem neuen Schema funktionieren. `/api/health` meldet die Schema-Version (aktuell 3).
+Migrationen nur **additiv** schreiben (neue Datei `migrations/000N_*.sql`). Der laufende Code muss mit dem neuen Schema funktionieren. `/api/health` meldet die Schema-Version (aktuell 4).
 
 ### Design an den Einladungsflyer anpassen
 
@@ -102,7 +103,7 @@ npm test                                         # Unit- + Integrationstests (in
 PW_CHROMIUM_PATH=/pfad/zu/chrome npm run test:e2e
 ```
 
-`npm run test:smoke` legt beim ersten Start eine `.dev.vars` mit Zufalls-Secrets an (`BOOTSTRAP_TOKEN=local-bootstrap-token`). `npm run dev:api` startet nur `wrangler pages dev` auf demselben Port :8799.
+`npm run test:smoke` legt beim ersten Start eine `.dev.vars` mit Zufalls-Secrets an (`BOOTSTRAP_TOKEN=local-bootstrap-token`). `npm run dev:api` startet nur `wrangler pages dev` auf demselben Port :8799. Für Passkeys lokal `WEBAUTHN_ORIGIN=http://localhost:5173` (Vite) bzw. `http://localhost:8799` in `.dev.vars` setzen und die App über `localhost` öffnen – WebAuthn akzeptiert keine IP-Adressen.
 
 ## Einmalige Einrichtung (Owner mit Cloudflare-Zugang)
 
@@ -122,7 +123,7 @@ PW_CHROMIUM_PATH=/pfad/zu/chrome npm run test:e2e
    - PR, 1 Review und grüne CI-Checks Pflicht, kein Force-Push
    - CODEOWNERS prüfen
 7. `wrangler.toml` committen und mergen, der Deploy läuft automatisch. Danach den Workflow „Datenlöschung“ unter _Actions_ einmal manuell starten und prüfen, dass er grün ist.
-8. Ersten Owner anlegen: `/admin/bootstrap` öffnen, den `BOOTSTRAP_TOKEN` eingeben, den Einladungslink öffnen und Passwort + 2FA einrichten. Danach weitere Admins einladen, mindestens **2 Owner**. Anschließend `BOOTSTRAP_TOKEN` in GitHub löschen und den Deploy erneut ausführen. Der Deploy entfernt optionale Secrets, die in GitHub leer sind oder fehlen, auch aus Pages.
+8. Ersten Owner anlegen: `/admin/bootstrap` öffnen, den `BOOTSTRAP_TOKEN` eingeben, den Einladungslink öffnen und „Mit Passkey einrichten“ wählen (oder Passwort + 2FA). Danach weitere Admins einladen, mindestens **2 Owner**. Notfall, falls der letzte Owner keinen Zugang mehr hat: `PRODUCTION_URL=https://… node scripts/notfall-einladung.ts <benutzername>` gibt einen `wrangler d1 execute`-Befehl und einen Reset-Link aus. Anschließend `BOOTSTRAP_TOKEN` in GitHub löschen und den Deploy erneut ausführen. Der Deploy entfernt optionale Secrets, die in GitHub leer sind oder fehlen, auch aus Pages.
 
 **Wichtig:** `SESSION_PEPPER` und `ENC_KEY` nie ändern. Sonst sind alle Passwörter, 2FA-Geheimnisse und die Spotify-Verbindung ungültig, und alle Admins müssen neu eingeladen werden.
 
