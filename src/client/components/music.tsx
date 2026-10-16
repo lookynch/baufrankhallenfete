@@ -1,20 +1,26 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
+import { coverPath } from '../../shared/spotify.ts';
 import { useI18n, type MessageKey } from '../lib/i18n.tsx';
 
 export function Cover({
   src,
   size = 64,
+  large,
   className = '',
 }: {
   src: string | null | undefined;
   size?: number;
+  large?: boolean;
   className?: string;
 }) {
-  if (!src) {
+  const path = coverPath(src);
+  const [failed, setFailed] = useState<string | null>(null);
+  const shape = `shrink-0 ${large ? 'rounded-lg' : 'rounded'} ${className}`;
+  if (!path || failed === path) {
     return (
       <div
-        className={`grid shrink-0 place-items-center rounded-xl bg-gradient-to-br from-primary/40 to-accent/40 text-xl ${className}`}
+        className={`grid place-items-center bg-gradient-to-br from-primary/40 to-accent/40 text-xl ${shape}`}
         style={{ width: size, height: size }}
       >
         ♪
@@ -23,11 +29,12 @@ export function Cover({
   }
   return (
     <img
-      src={src}
+      src={path}
       alt=""
       loading="lazy"
-      referrerPolicy="no-referrer"
-      className={`shrink-0 rounded-xl object-cover ${className}`}
+      decoding="async"
+      onError={() => setFailed(path)}
+      className={`object-cover ${shape}`}
       style={{ width: size, height: size }}
     />
   );

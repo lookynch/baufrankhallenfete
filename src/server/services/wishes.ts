@@ -1,7 +1,7 @@
+import { trackIdFromUri } from '../../shared/spotify.ts';
 import { hitRateLimit } from '../security/ratelimit.ts';
 import { ensureSong, normalizeTitle } from './library.ts';
 import type { SpotifyApi, SpotifyTrack } from './spotify-api.ts';
-import { trackIdFromUri } from './spotify-api.ts';
 
 export class WishError extends Error {}
 

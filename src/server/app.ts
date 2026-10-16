@@ -8,6 +8,7 @@ import { adminGuard, authRoutes, requireAdmin } from './routes/admin/auth.ts';
 import { musicRoutes } from './routes/admin/music.ts';
 import { ownerRoutes, systemRoutes } from './routes/admin/system.ts';
 import { buzzerRoutes } from './routes/buzzer.ts';
+import { coverRoutes } from './routes/cover.ts';
 import { displayRoutes } from './routes/display.ts';
 import { publicRoutes } from './routes/public.ts';
 import { getKv } from './services/kv.ts';
@@ -40,7 +41,7 @@ export function createApp(options: AppOptions = {}) {
     c.set('rt', { env: c.env, now, waitUntil, spotify: spotifyFactory(c.env, now) });
     await next();
     for (const [name, value] of Object.entries(securityHeaders)) c.header(name, value);
-    c.header('Cache-Control', 'no-store');
+    if (!c.res.headers.has('Cache-Control')) c.header('Cache-Control', 'no-store');
   });
 
   app.use('/public/*', async (c, next) => {
@@ -60,6 +61,7 @@ export function createApp(options: AppOptions = {}) {
   app.route('/public', publicRoutes);
   app.route('/display', displayRoutes);
   app.route('/buzzer', buzzerRoutes);
+  app.route('/cover', coverRoutes);
 
   const admin = new Hono<AppEnv>();
   admin.use('*', adminGuard);

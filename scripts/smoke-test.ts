@@ -73,14 +73,15 @@ const checks: Array<[string, () => Promise<boolean>]> = [
     async () => ((await (await fetch(`${base}/api/health`)).json()) as { schemaVersion: number }).schemaVersion === 3,
   ],
   [
-    'Startseite mit CSP aus _headers, ohne Fremdskripte',
+    'Startseite mit CSP aus _headers, ohne Fremdhosts',
     async () => {
       const res = await fetch(`${base}/`);
       const csp = res.headers.get('content-security-policy') ?? '';
-      return res.ok && csp.includes("frame-ancestors 'none'") && !csp.includes('challenges.cloudflare.com');
+      return res.ok && csp.includes("frame-ancestors 'none'") && !csp.includes('https:');
     },
   ],
   ['SPA-Fallback für /admin', async () => (await fetch(`${base}/admin`)).ok],
+  ['Cover-Proxy mit ungültiger ID → 404', async () => (await fetch(`${base}/api/cover/abc`)).status === 404],
   ['Display ohne Kopplung → 401', async () => (await fetch(`${base}/api/display/state`)).status === 401],
   ['Admin ohne Login → 401', async () => (await fetch(`${base}/api/admin/auth/me`)).status === 401],
   [

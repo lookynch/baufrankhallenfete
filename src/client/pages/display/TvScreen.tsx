@@ -71,7 +71,7 @@ function NowPlayingPanel({
   if (!nowPlaying) {
     return (
       <div className="flex items-center gap-6">
-        <Cover src={null} size={compact ? 120 : 220} />
+        <Cover src={null} size={compact ? 120 : 220} large />
         <div className={`font-display font-bold text-muted ${compact ? 'text-3xl' : 'text-5xl'}`}>
           {t('tv.noMusic')}
         </div>
@@ -80,7 +80,7 @@ function NowPlayingPanel({
   }
   return (
     <div className="flex items-center gap-6">
-      <Cover src={nowPlaying.imageUrl} size={compact ? 120 : 220} className="shadow-2xl" />
+      <Cover src={nowPlaying.imageUrl} size={compact ? 120 : 220} large className="shadow-2xl" />
       <div className="min-w-0 flex-1">
         <div className={`font-display leading-tight font-bold ${compact ? 'text-3xl' : 'text-5xl'} line-clamp-2`}>
           {nowPlaying.title}
@@ -139,7 +139,7 @@ export function TvScreen({ state, offsetMs }: { state: MusicState; offsetMs: num
           <ol className="flex flex-col gap-3">
             {state.upNext.slice(0, 6).map((song) => (
               <li key={song.id} className="flex items-center gap-4">
-                <Cover src={song.imageUrl} size={64} />
+                <Cover src={song.imageUrl} size={64} large />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-2xl font-semibold">{song.title}</div>
                   <div className="truncate text-lg text-muted">{song.artist}</div>
@@ -185,7 +185,7 @@ export function TvScreen({ state, offsetMs }: { state: MusicState; offsetMs: num
                       style={{ width: `${((c.votes ?? 0) / maxVotes) * 85}%` }}
                     />
                     <div className="relative flex items-center gap-3 px-3 py-2">
-                      <Cover src={c.imageUrl} size={44} />
+                      <Cover src={c.imageUrl} size={44} large />
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-xl font-semibold">
                           {c.wishKey ? <span className="mr-2 font-mono text-base text-accent">{c.wishKey}</span> : null}
@@ -249,7 +249,7 @@ export function PlayerTicker({ state, offsetMs }: { state: MusicState; offsetMs:
       {next ? (
         <div className="flex items-center gap-4 rounded-3xl bg-surface/70 p-6 ring-1 ring-line">
           <span className="text-lg font-semibold text-muted">{t('player.next')}</span>
-          <Cover src={next.imageUrl} size={56} />
+          <Cover src={next.imageUrl} size={56} large />
           <div className="min-w-0">
             <div className="truncate text-xl font-semibold">{next.title}</div>
             <div className="truncate text-muted">{next.artist}</div>

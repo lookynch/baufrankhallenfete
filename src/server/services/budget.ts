@@ -66,3 +66,7 @@ export function throttleFactor(budget: RequestBudget | null, now: number): numbe
   if (budget.fraction >= 0.6) return 2;
   return 1;
 }
+
+export function guestCoversAllowed(budget: RequestBudget | null, now: number): boolean {
+  return throttleFactor(budget, now) < 4;
+}

@@ -2,7 +2,7 @@ export const contentSecurityPolicy = [
   "default-src 'self'",
   "script-src 'self'",
   "connect-src 'self'",
-  "img-src 'self' data: https://*.scdn.co https://*.spotifycdn.com",
+  "img-src 'self' data:",
   "style-src 'self'",
   "font-src 'self'",
   "object-src 'none'",

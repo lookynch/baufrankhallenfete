@@ -1,12 +1,14 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../src/server/app.ts';
 import type { Env } from '../../src/server/env.ts';
 import { buzzerSignature } from '../../src/server/routes/buzzer.ts';
 import { presenceToken } from '../../src/server/security/presence.ts';
 import { totpCode } from '../../src/server/security/totp.ts';
+import { setKv } from '../../src/server/services/kv.ts';
 import { saveSettings } from '../../src/server/services/settings.ts';
+import { tick } from '../../src/server/services/tick.ts';
 import { FakeSpotify, makeTrack } from '../helpers/fake-spotify.ts';
-import { Clock, testEnv } from '../helpers/runtime.ts';
+import { Clock, testEnv, testRuntime } from '../helpers/runtime.ts';
 
 const ORIGIN = 'https://fete.example';
 const T0 = Date.UTC(2026, 10, 20, 17, 0, 0);
@@ -106,6 +108,8 @@ describe('Grundlagen', () => {
     expect(res.json.schemaVersion).toBe(3);
     expect(res.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");
     expect(res.headers.get('Content-Security-Policy')).not.toContain('challenges.cloudflare.com');
+    expect(res.headers.get('Content-Security-Policy')).toContain("img-src 'self' data:;");
+    expect(res.headers.get('Content-Security-Policy')).not.toContain('https:');
     expect(res.headers.get('Cache-Control')).toBe('no-store');
     const missing = await h.client().request('GET', '/api/nope');
     expect(missing.status).toBe(404);
@@ -371,5 +375,109 @@ describe('Displays und Gäste', () => {
       headers: { Origin: 'https://evil.example' },
     });
     expect(csrf.status).toBe(403);
+  });
+});
+
+describe('Cover-Proxy', () => {
+  const id = 'ab67616d0000b2730123456789abcdef01234567';
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('lehnt ungültige IDs ohne Abruf bei Spotify ab', async () => {
+    const upstream = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', upstream);
+    const client = new Harness().client();
+    for (const path of ['/api/cover/xyz', `/api/cover/${id.toUpperCase()}`, `/api/cover/${id}0`]) {
+      const res = await client.request('GET', path);
+      expect(res.status).toBe(404);
+      expect(res.headers.get('Cache-Control')).toBe('no-store');
+      expect(res.headers.get('X-Frame-Options')).toBe('DENY');
+    }
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it('liefert Cover über den eigenen Server mit privatem Cache und Sicherheits-Headern', async () => {
+    const upstream = vi.fn<typeof fetch>(
+      async () => new Response(new Uint8Array([255, 216, 255]), { headers: { 'Content-Type': 'image/jpeg' } }),
+    );
+    vi.stubGlobal('fetch', upstream);
+    const client = new Harness().client();
+    client.cookies.set('__Host-fete', 'geheim');
+    const res = await client.request('GET', `/api/cover/${id}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('image/jpeg');
+    expect(res.headers.get('Cache-Control')).toBe('private, max-age=86400, immutable');
+    expect(res.headers.get('Cross-Origin-Resource-Policy')).toBe('same-origin');
+    expect(res.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");
+    expect(upstream).toHaveBeenCalledTimes(1);
+    const [url, init] = upstream.mock.calls[0]!;
+    expect(String(url)).toBe(`https://i.scdn.co/image/${id}`);
+    expect(init?.headers).toEqual({ Accept: 'image/*' });
+
+    upstream.mockResolvedValueOnce(new Response('down', { status: 503 }));
+    const failed = await client.request('GET', `/api/cover/${id}`);
+    expect(failed.status).toBe(502);
+    expect(failed.headers.get('Cache-Control')).toBe('no-store');
+  });
+});
+
+describe('Budget-Wächter für Gast-Cover', () => {
+  it('blendet Cover in Zustand, Wünschen und Suche ab 80 % aus', async () => {
+    const h = new Harness();
+    const db = h.env.DB;
+    const cover = (i: number) => `https://i.scdn.co/image/ab67616d0000b273${String(i).padStart(24, '0')}`;
+    await saveSettings(db, 'voting', { startsAt: T0 - 60_000 }, T0, null);
+    await db
+      .prepare("INSERT INTO sets (name, starts_at, ends_at, default_level, created_at) VALUES ('Alles', ?1, ?2, 2, 0)")
+      .bind(T0 - 3_600_000, T0 + 9 * 3_600_000)
+      .run();
+    for (let i = 0; i < 12; i++) {
+      const t = { ...makeTrack(i), imageUrl: cover(i) };
+      h.spotify.add(t);
+      await db
+        .prepare(
+          'INSERT INTO songs (spotify_uri, isrc, title, artist, image_url, duration_ms, title_norm, artist_norm, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?3, ?4, 0)',
+        )
+        .bind(t.uri, t.isrc, t.title, t.artist, t.imageUrl, t.durationMs)
+        .run();
+    }
+    await db.prepare('INSERT INTO set_songs (set_id, song_id, added_at) SELECT 1, id, 0 FROM songs').run();
+    const wish = { ...makeTrack(0, 200_000, 'wish'), imageUrl: cover(99) };
+    h.spotify.add(wish);
+    h.spotify.current = { uri: makeTrack(0).uri, startedAt: T0, pausedAt: null };
+
+    const guest = h.client('2a02:810d:aaaa:1::5');
+    const token = await presenceToken('test-qr-secret-0123456789', h.clock.time);
+    expect((await guest.request('POST', '/api/public/join', { json: { token } })).status).toBe(200);
+    expect((await guest.request('POST', '/api/public/wishes', { json: { uri: wish.uri } })).status).toBe(200);
+    h.clock.advance(5_000);
+    await tick(testRuntime(h.env, h.clock, h.spotify), { force: true });
+
+    async function guestCovers(fraction: number) {
+      await setKv(
+        db,
+        'request_budget',
+        { requestsToday: fraction * 100_000, fraction, fetchedAt: h.clock.time, error: null },
+        h.clock.time,
+      );
+      const state = await guest.request('GET', '/api/public/state');
+      const wishes = await guest.request('GET', '/api/public/wishes');
+      const search = await guest.request('GET', '/api/public/search?q=song');
+      return [
+        (state.json.nowPlaying as { imageUrl: string | null }).imageUrl,
+        ...(state.json.round as { candidates: Array<{ imageUrl: string | null }> }).candidates.map((c) => c.imageUrl),
+        ...(wishes.json.wishes as Array<{ image_url: string | null }>).map((w) => w.image_url),
+        ...(search.json.tracks as Array<{ imageUrl: string | null }>).map((t) => t.imageUrl),
+      ];
+    }
+
+    const normal = await guestCovers(0.79);
+    expect(normal.length).toBeGreaterThan(10);
+    expect(normal.every((url) => url?.startsWith('https://i.scdn.co/image/'))).toBe(true);
+    expect(normal).toContain(cover(99));
+    const throttled = await guestCovers(0.85);
+    expect(throttled).toHaveLength(normal.length);
+    expect(throttled.every((url) => url === null)).toBe(true);
   });
 });

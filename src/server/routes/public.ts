@@ -6,7 +6,7 @@ import { decodeGuest, encodeGuest, GUEST_COOKIE, newDeviceId, type GuestIdentity
 import { ipKeyHash } from '../security/ip.ts';
 import { verifyPresenceToken } from '../security/presence.ts';
 import { hitRateLimit } from '../security/ratelimit.ts';
-import { readBudget, throttleFactor } from '../services/budget.ts';
+import { guestCoversAllowed, readBudget, throttleFactor, type RequestBudget } from '../services/budget.ts';
 import { openRound, votingActive } from '../services/rounds.ts';
 import { loadSettings } from '../services/settings.ts';
 import { legal } from '../../shared/legal.ts';
@@ -38,13 +38,17 @@ async function requireGuest(c: AppContext): Promise<GuestIdentity> {
   return guest;
 }
 
-async function guestPollAfterMs(c: AppContext, settings: Settings, round: RoundView | null, now: number) {
+async function coversAllowed(c: AppContext) {
+  return guestCoversAllowed(await readBudget(c.env.DB), c.var.rt.now());
+}
+
+function guestPollAfterMs(settings: Settings, round: RoundView | null, now: number, budget: RequestBudget | null) {
   const until = (at: number) =>
     Math.round(
       Math.min(MAX_GUEST_POLL_MS, Math.max(at - now, MIN_GUEST_POLL_MS) + Math.random() * GUEST_POLL_JITTER_MS),
     );
   if (round) return until(round.expectedCloseAt);
-  if (votingActive(settings, now)) return settings.polling.guestMs * throttleFactor(await readBudget(c.env.DB), now);
+  if (votingActive(settings, now)) return settings.polling.guestMs * throttleFactor(budget, now);
   if (settings.voting.enabled && now < settings.voting.startsAt) return until(settings.voting.startsAt);
   return MAX_GUEST_POLL_MS;
 }
@@ -97,15 +101,20 @@ publicRoutes.get('/state', async (c) => {
   const snapshot = await readSnapshot(c.env.DB);
   const track = snapshot?.snapshot?.track;
   const view = round ? await roundView(c.env.DB, round, now, { includeTally: false, snapshot }) : null;
+  const budget = await readBudget(c.env.DB);
+  const covers = guestCoversAllowed(budget, now);
   return c.json({
     joined: true,
     now,
     eventName: settings.event.name,
     voting: { active: votingActive(settings, now), startsAt: settings.voting.startsAt, endsAt: settings.voting.endsAt },
-    round: view,
+    round:
+      view && !covers
+        ? { ...view, candidates: view.candidates.map((candidate) => ({ ...candidate, imageUrl: null })) }
+        : view,
     myVote: round ? await myVote(c.env.DB, round.id, decoded.deviceId) : null,
-    nowPlaying: track ? { title: track.title, artist: track.artist, imageUrl: track.imageUrl } : null,
-    pollAfterMs: await guestPollAfterMs(c, settings, view, now),
+    nowPlaying: track ? { title: track.title, artist: track.artist, imageUrl: covers ? track.imageUrl : null } : null,
+    pollAfterMs: guestPollAfterMs(settings, view, now, budget),
   });
 });
 
@@ -140,13 +149,14 @@ publicRoutes.get('/search', async (c) => {
   await limit(c, 'search-device', 20, 60, guest.deviceId);
   const { q } = query(c, z.object({ q: z.string().min(1).max(100) }));
   const result = await searchTracks(c.env.DB, c.var.rt.spotify, q, now);
+  const covers = await coversAllowed(c);
   return c.json({
     limited: result.limited,
     tracks: result.tracks.map((t) => ({
       uri: t.uri,
       title: t.title,
       artist: t.artist,
-      imageUrl: t.imageUrl,
+      imageUrl: covers ? t.imageUrl : null,
       explicit: t.explicit,
       durationMs: t.durationMs,
     })),
@@ -155,7 +165,8 @@ publicRoutes.get('/search', async (c) => {
 
 publicRoutes.get('/wishes', async (c) => {
   const guest = await requireGuest(c);
-  return c.json({ wishes: await guestWishes(c.env.DB, guest.deviceId) });
+  const wishes = await guestWishes(c.env.DB, guest.deviceId);
+  return c.json({ wishes: (await coversAllowed(c)) ? wishes : wishes.map((w) => ({ ...w, image_url: null })) });
 });
 
 publicRoutes.post('/wishes', async (c) => {

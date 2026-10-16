@@ -66,8 +66,14 @@ export function Dashboard() {
       `Set „${c.name}“: nur ${c.nearbyMinutes} min passende Musik für ${c.durationMinutes} min – mehr Songs hinzufügen.`,
     );
   }
-  if ((data.budget?.fraction ?? 0) >= 0.6)
-    warnings.push('Request-Budget über 60 % – Polling wird automatisch gedrosselt.');
+  const budgetFraction = data.budget?.fraction ?? 0;
+  if (!data.budget || data.budget.error)
+    warnings.push(
+      'Budget-Wächter inaktiv – ohne Analytics-Daten (CF_ANALYTICS_TOKEN) werden Polling und Cover nicht gedrosselt.',
+    );
+  else if (budgetFraction >= 0.8)
+    warnings.push('Request-Budget über 80 % – Polling stark gedrosselt, Gäste sehen keine Cover.');
+  else if (budgetFraction >= 0.6) warnings.push('Request-Budget über 60 % – Polling wird automatisch gedrosselt.');
   const hints: string[] = [];
   if (!data.accessConfigured)
     hints.push('Cloudflare Access ist nicht eingerichtet – der Adminbereich ist nur durch Passwort und 2FA geschützt.');
